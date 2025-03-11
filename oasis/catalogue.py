@@ -170,7 +170,7 @@ def classify_single_mini_box(
     Parameters
     ----------
     mini_box_id : int
-        Sub-box ID
+        Mini-box ID
     min_num_part : int
         Minimum number of particles needed to be considered a halo
     boxsize : float
@@ -499,7 +499,7 @@ def classify_all_mini_boxes(
         Only particles up to this distance from the mini box edge are considered 
         for classification. Defaults to 5
     n_threads : int
-        Number of threads
+        Number of threads, by default None
 
     Returns
     -------
