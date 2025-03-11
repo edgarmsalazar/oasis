@@ -117,7 +117,7 @@ def _select_candidate_seeds(
     n_seeds : int
         Number of seeds to process
     seed_data : tuple[np.ndarray]
-        Tuple with seed ID, R200b, M200b, positions and velocities.
+        Tuple with seed ID, positions, velocities, R200b and M200b.
     r_max : float
         Maximum distance to consider
     boxsize : float
@@ -138,15 +138,15 @@ def _select_candidate_seeds(
         in units of R200m and M200m.
     """
     # Load seed data
-    hid, r200b, m200b, pos_seed, vel_seed = seed_data
+    hid, pos_seed, vel_seed, r200b, m200b = seed_data
 
     # Rank order by mass.
     order = np.argsort(-m200b)
     hid = hid[order]
-    r200b = r200b[order]
-    m200b = m200b[order]
     pos_seed = pos_seed[order]
     vel_seed = vel_seed[order]
+    r200b = r200b[order]
+    m200b = m200b[order]
 
     # Search for eligible seeds.
     # A seed is considered eligible if it dominates its own environment. This is
@@ -241,7 +241,7 @@ def get_calibration_data(
     n_seeds : int
         Number of seeds to process
     seed_data : tuple[np.ndarray]
-        Tuple with seed ID, R200b, M200b, positions and velocities.
+        Tuple with seed ID, positions, velocities, R200b and M200b.
     r_max : float
         Maximum distance to consider
     boxsize : float
@@ -399,7 +399,7 @@ def calibrate_finder(
     n_seeds : int
         Number of seeds to process
     seed_data : tuple[np.ndarray]
-        Tuple with seed ID, R200b, M200b, positions and velocities.
+        Tuple with seed ID, positions, velocities, R200b and M200b.
     r_max : float
         Maximum distance to consider
     boxsize : float
