@@ -39,7 +39,7 @@ def characteristic_density(
     ZeroDivisionError
         If `r200` or `rs` are zero.
     """
-    if rs == 0. or r200 == 0:
+    if np.any(rs == 0.) or np.any(r200 == 0.):
         raise ZeroDivisionError('Neither r200 nor rs can be zero.')
 
     c200 = r200 / rs
