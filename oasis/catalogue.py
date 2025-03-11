@@ -159,7 +159,7 @@ def classify_single_mini_box(
     boxsize: float,
     minisize: float,
     load_path: str,
-    dir_name: str,
+    run_name: str,
     padding: float = 5.0,
     fast_mass: bool = False,
     part_mass: float = None,
@@ -179,8 +179,8 @@ def classify_single_mini_box(
         Size of mini box
     load_path : str
         Location from where to load the file
-    dir_name : str
-        Label for the current run. The directory created will be `run_dir_name`.
+    run_name : str
+        Label for the current run. The directory created will be `run_<run_name>`
     padding : float
         Only particles up to this distance from the mini box edge are considered 
         for classification. Defaults to 5
@@ -189,7 +189,7 @@ def classify_single_mini_box(
     -------
     None
     """
-    save_path = load_path + f'run_{dir_name}/mini_box_catalogues/'
+    save_path = load_path + f'run_{run_name}/mini_box_catalogues/'
     if not os.path.exists(save_path):
         os.makedirs(save_path)
 
@@ -471,7 +471,7 @@ def classify_single_mini_box(
 
 def classify_all_mini_boxes(
     load_path: str,
-    dir_name: str,
+    run_name: str,
     min_num_part: int,
     boxsize: float,
     minisize: float,
@@ -493,8 +493,8 @@ def classify_all_mini_boxes(
         Size of simulation box
     minisize : float
         Size of mini box
-    dir_name : str
-        Label for the current run. The directory created will be `run_dir_name`.
+    run_name : str
+        Label for the current run. The directory created will be `run_<run_name>`
     padding : float, optional
         Only particles up to this distance from the mini box edge are considered 
         for classification. Defaults to 5
@@ -506,7 +506,7 @@ def classify_all_mini_boxes(
     None
     """
     # Create directory if it does not exist
-    save_path = load_path + f'run_{dir_name}/mini_box_catalogues/'
+    save_path = load_path + f'run_{run_name}/mini_box_catalogues/'
     if not os.path.exists(save_path):
         os.makedirs(save_path)
 
@@ -516,7 +516,7 @@ def classify_all_mini_boxes(
     # Parallel processing of miniboxes.
     func = partial(classify_single_mini_box, min_num_part=min_num_part,
                    boxsize=boxsize, load_path=load_path, minisize=minisize,
-                   padding=padding, dir_name=dir_name, fast_mass=fast_mass,
+                   padding=padding, run_name=run_name, fast_mass=fast_mass,
                    part_mass=part_mass, disable_tqdm=True)
 
     with Pool(n_threads) as pool, \
@@ -533,7 +533,7 @@ def classify_all_mini_boxes(
         halo_keys = list((hdf_load['halo'].keys()))
     halo_data = [[] for _ in range(len(halo_keys))]
 
-    hdf_memb = h5.File(load_path + f'run_{dir_name}/members.hdf5', 'w')
+    hdf_memb = h5.File(load_path + f'run_{run_name}/members.hdf5', 'w')
     for i in tqdm(range(n_mini_boxes), ncols=100, desc='Merging catalogues',
                   colour='green'):
         with h5.File(save_path + f'{i}.hdf5', 'r') as hdf_load:
@@ -593,7 +593,7 @@ def classify_all_mini_boxes(
     slidx[mask] = -1
     sridx[mask] = -1
 
-    with h5.File(load_path + f'run_{dir_name}/catalogue.hdf5', 'w') as hdf:
+    with h5.File(load_path + f'run_{run_name}/catalogue.hdf5', 'w') as hdf:
         hdf.create_dataset('SLIDX', data=slidx)
         hdf.create_dataset('SRIDX', data=sridx)
         for k, key in enumerate(halo_keys):
