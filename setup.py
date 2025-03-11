@@ -1,7 +1,8 @@
-import os
 import glob
+import os
 import re
-from setuptools import setup, find_packages
+
+from setuptools import find_packages, setup
 
 project_name = 'oasis'
 sources = glob.glob(os.path.join(project_name,'*.py'))
