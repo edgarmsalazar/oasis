@@ -469,7 +469,7 @@ def classify_single_mini_box(
     return None
 
 
-def classify_all_mini_boxes(
+def run_orbiting_mass_assignment(
     load_path: str,
     run_name: str,
     min_num_part: int,

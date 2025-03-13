@@ -117,7 +117,7 @@ def _select_candidate_seeds(
     n_seeds : int
         Number of seeds to process
     seed_data : tuple[np.ndarray]
-        Tuple with seed ID, positions, velocities, R200b and M200b.
+        Tuple with seed ID, positions, velocities, M200b and R200b.
     r_max : float
         Maximum distance to consider
     boxsize : float
@@ -138,7 +138,7 @@ def _select_candidate_seeds(
         in units of R200m and M200m.
     """
     # Load seed data
-    hid, pos_seed, vel_seed, r200b, m200b = seed_data
+    hid, pos_seed, vel_seed, m200b, r200b  = seed_data
 
     # Rank order by mass.
     order = np.argsort(-m200b)
@@ -241,7 +241,7 @@ def get_calibration_data(
     n_seeds : int
         Number of seeds to process
     seed_data : tuple[np.ndarray]
-        Tuple with seed ID, positions, velocities, R200b and M200b.
+        Tuple with seed ID, positions, velocities, M200b and R200b.
     r_max : float
         Maximum distance to consider
     boxsize : float
@@ -377,7 +377,7 @@ def gradient_minima(
     return grad_r, grad_min
 
 
-def calibrate_finder(
+def calibrate(
     n_seeds: int,
     seed_data: tuple[np.ndarray],
     r_max: float,
@@ -399,7 +399,7 @@ def calibrate_finder(
     n_seeds : int
         Number of seeds to process
     seed_data : tuple[np.ndarray]
-        Tuple with seed ID, positions, velocities, R200b and M200b.
+        Tuple with seed ID, positions, velocities, M200b and R200b.
     r_max : float
         Maximum distance to consider
     boxsize : float
