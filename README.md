@@ -25,11 +25,11 @@ $ python -m pip install .
 A [template](template.py) file is provided as an example of how to use the code. It is very simple and it consists of four basic steps: preparing data, calibrating and runnning.
 
 ### User parameters
-The choice of units is not strict to the ones shown below. However, it must be consisten across all quantities with the same physical dimensions. For example, if the units for the `boxsize` are in $h^{-1}$ Mpc, then all disntances, positions and radii must also be provided in $h^{-1}$ Mpc.
+The choice of units is not strict to the ones shown below. However, it must be consisten across all quantities with the same physical dimensions. For example, if the units for the `boxsize` are in $h^{-1}{\rm Mpc}$, then all disntances, positions and radii must also be provided in $h^{-1}{\rm Mpc}$.
 
-- `boxsize`: side length of the simulation box in units of $h^{-1}$ Mpc.
-- `minisize`: side length of the subvolume or minibox in units of $h^{-1}$ Mpc.
-- `padding`: length of the padding distance form the edge of the minibox in unnits of $h^{-1}$ Mpc.
+- `boxsize`: side length of the simulation box in units of $h^{-1}{\rm Mpc}$.
+- `minisize`: side length of the subvolume or minibox in units of $h^{-1}{\rm Mpc}$.
+- `padding`: length of the padding distance form the edge of the minibox in unnits of $h^{-1}{\rm Mpc}$.
 - `rhom`: mass density of the Universe in units of $h^{-2} M_{\odot} / {\rm Mpc}^{3}$.
 - `part_mass`: dark matter particle mass in units of $h^{-2} M_{\odot}$.
 - `save_path`: path to the directory where <span style="font-variant:small-caps;">Oasis</span> will save all data products.
@@ -82,7 +82,7 @@ The same function is used for particles with the only exception that `props=None
 Before running <span style="font-variant:small-caps;">Oasis</span> on the full volume, it needs to be calibrated. That is find the cut line in $\ln v^2-r$ space that classifies particles into orbiting and infalling. Below are the parameters for the `calibrate` method and example.
 
 - `n_seeds`: number of seeds to load.
-- `r_max`: search radius in units of $h^{-1}$ Mpc.. All particles within this radius will be collected for calibration.
+- `r_max`: search radius in units of $h^{-1}{\rm Mpc}$.. All particles within this radius will be collected for calibration.
 - `calib_p`: calibration parameter for $v_r>0$. Sets the target fraction of particles below the cut line. Defaults to 0.995.
 - `calib_w`: calibration parameter for $v_r<0$. Sets the width of the band around the cut line. Defaults to 0.050.
 - `calib_n_points`: number of gradient points to use when finding the slope of the cut line. Defaults to 20.
