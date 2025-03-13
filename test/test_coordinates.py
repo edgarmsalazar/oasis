@@ -80,18 +80,23 @@ def test_relative_coordinates():
 def test_get_vr_vt_from_coordinates():
 
     x = numpy.array([1., 1., 1.])
-    v = numpy.array([1., 1., 1.])
+    v = numpy.array([1., 1., -1.])
 
     with pytest.raises(ValueError):
         coordinates.velocity_components(x, v)
 
-    x = numpy.vstack([x, v, 2*v, 3*v])
-    vr, vt, v2 = coordinates.velocity_components(x, x)
+    x = numpy.array([x])
+    v = numpy.array([v])
+    vr, vt, v2 = coordinates.velocity_components(x, v)
 
-    assert vr[0] == pytest.approx(numpy.sqrt(3.))
-    assert vt[0] == 0.
+    vr_expected = numpy.sin(numpy.arccos(1./numpy.sqrt(3.))) * \
+        (numpy.cos(numpy.pi/4.) + numpy.sin(numpy.pi/4.)) - 1./numpy.sqrt(3.)
+    vt_expected = numpy.sin(numpy.arccos(1./numpy.sqrt(3.))) + 1./numpy.sqrt(3.) * \
+        (numpy.cos(numpy.pi/4.) + numpy.sin(numpy.pi/4.))
+
+    assert vr[0] == pytest.approx(vr_expected)
+    assert vt[0] == pytest.approx(vt_expected)
     assert v2[0] == 3.
-    assert v2[-1] == 27.
 
 
 ###
