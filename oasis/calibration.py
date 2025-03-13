@@ -59,7 +59,7 @@ def _get_candidate_particle_data(
     r, vr, lnv2 = ([] for _ in range(3))
     for i in range(len(pos_seed)):
         # Compute the relative positions of all particles in the box
-        rel_pos = relative_coordinates(pos_seed[i], pos, boxsize)
+        rel_pos = relative_coordinates(pos, pos_seed[i], boxsize)
         # Only work with those close to the seed
         mask_close = np.prod(np.abs(rel_pos) <= r_max, axis=1, dtype=bool)
 

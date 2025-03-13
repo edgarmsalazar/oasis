@@ -123,7 +123,7 @@ def get_adjacent_mini_box_ids(
         raise ValueError(f'ID {mini_box_id} is out of bounds')
 
     x0 = centres[mini_box_ids == mini_box_id]
-    radius = relative_coordinates(x0, centres, boxsize)
+    radius = relative_coordinates(centres, x0, boxsize)
     radius = np.sqrt(np.sum(np.square(radius), axis=1))
     mask = radius <= 1.01 * np.sqrt(3.) * minisize
     return mini_box_ids[mask]
@@ -439,7 +439,7 @@ def load_particles(
     loc_id = grid_ids == mini_box_id
     padded_distance = 0.5 * minisize + padding
     absolute_rel_pos = np.abs(
-        relative_coordinates(grid_pos[loc_id], pos, boxsize, periodic=True)
+        relative_coordinates(pos, grid_pos[loc_id], boxsize, periodic=True)
     )
     mask = np.prod(absolute_rel_pos <= padded_distance, axis=1, dtype=bool)
 
@@ -521,7 +521,7 @@ def load_seeds(
     loc_id = grid_ids == mini_box_id
     padded_distance = 0.5 * minisize + padding
     absolute_rel_pos = np.abs(relative_coordinates(
-        grid_pos[loc_id], pos, boxsize, periodic=True,
+        pos, grid_pos[loc_id], boxsize, periodic=True,
     ))
     mask = np.prod(absolute_rel_pos <= padded_distance, axis=1, dtype=bool)
 
