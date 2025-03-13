@@ -245,7 +245,7 @@ def classify_single_mini_box(
         # ======================================================================
         #                           Classify particles
         # ======================================================================
-        rel_pos_all = relative_coordinates(pos_seed[i], pos_part, boxsize)
+        rel_pos_all = relative_coordinates(pos_part, pos_seed[i], boxsize)
         rel_vel_all = vel_part - vel_seed[i]
 
         # Only work with free particles and within a 2*R200b cube box to speedup
@@ -272,7 +272,7 @@ def classify_single_mini_box(
         # otherwise, and all orbiting particles within the 6D ball are also
         # infalling.
         # ======================================================================
-        rel_pos_seed = relative_coordinates(pos_seed[i], pos_seed, boxsize)
+        rel_pos_seed = relative_coordinates(pos_seed, pos_seed[i], boxsize)
 
         # Only work with less massive seeds within a 2*R200b sphere.
         mask_seed = (np.sum(np.square(rel_pos_seed[i+1:]), axis=1) <= r_max**2) & \
@@ -300,8 +300,8 @@ def classify_single_mini_box(
                 j = 0
                 while is_halo and (j < n_seeds_near):
                     # Select particles around jth seed.
-                    rel_pos_part = relative_coordinates(pos_seed_near[j],
-                                                        pos_part[mask_part],
+                    rel_pos_part = relative_coordinates(pos_part[mask_part],
+                                                        pos_seed_near[j],
                                                         boxsize)
                     rel_vel_part = vel_part[mask_part] - vel_seed_near[j]
                     rp_sq = np.sum(np.square(rel_pos_part), axis=1)

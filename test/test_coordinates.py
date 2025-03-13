@@ -69,12 +69,12 @@ def test_relative_coordinates():
     assert coordinates.relative_coordinates(x1, x0, l_box, periodic=False) < 0
     assert coordinates.relative_coordinates(x1, x0, l_box) < x0 - x1
 
-    assert coordinates.relative_coordinates(x0, numpy.array([x0, x1]), 
+    assert coordinates.relative_coordinates(numpy.array([x0, x1]), x0, 
                                             l_box).shape == (2, )
     with pytest.raises(TypeError):
-        coordinates.relative_coordinates(x1, [x0, x1], l_box)
+        coordinates.relative_coordinates([x0, x1], x1, l_box)
     with pytest.raises(TypeError):
-        coordinates.relative_coordinates(x1, (x0, x1), l_box)
+        coordinates.relative_coordinates((x0, x1), x1, l_box)
 
 
 def test_get_vr_vt_from_coordinates():
