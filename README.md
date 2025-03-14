@@ -92,7 +92,7 @@ Before running <span style="font-variant:small-caps;">Oasis</span> on the full v
 ```python
 from oasis.calibration import calibrate
 
-data = hid, pos, vel, m200b, r200b, 
+data = hid, pos, vel, m200b, r200b
 
 calibrate(
     n_seeds=n_seeds,
