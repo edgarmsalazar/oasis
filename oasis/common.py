@@ -138,7 +138,7 @@ def mkdir(path: str, verbose: bool = False) -> int:
     isdir: bool = os.path.isdir(abspath)
     if not isdir:
         try:
-            os.mkdir(os.path.abspath(path))
+            os.makedirs(os.path.abspath(path), exist_ok=True)
             isdir = os.path.isdir(abspath)
             if isdir and verbose:
                 print(f"Directory created at {abspath}")
