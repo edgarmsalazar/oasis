@@ -9,7 +9,7 @@ import pandas as pd
 from scipy.optimize import fsolve
 from tqdm import tqdm
 
-from oasis.common import G_gravity
+from oasis.common import G_gravity, mkdir
 from oasis.coordinates import relative_coordinates
 from oasis.minibox import load_particles, load_seeds
 
@@ -190,8 +190,7 @@ def classify_single_mini_box(
     None
     """
     save_path = load_path + f'run_{run_name}/mini_box_catalogues/'
-    if not os.path.exists(save_path):
-        os.makedirs(save_path)
+    mkdir(save_path)
 
     # Load seeds in mini box
     pos_seed, vel_seed, hid, r200b, m200b, rs, mask_mb = \
@@ -507,8 +506,7 @@ def run_orbiting_mass_assignment(
     """
     # Create directory if it does not exist
     save_path = load_path + f'run_{run_name}/mini_box_catalogues/'
-    if not os.path.exists(save_path):
-        os.makedirs(save_path)
+    mkdir(save_path)
 
     # Number of miniboxes
     n_mini_boxes = np.int_(np.ceil(boxsize / minisize))**3
