@@ -229,7 +229,7 @@ def classify_single_mini_box(
         pars = (*hdf['pos'][()], *hdf['neg'][()])
 
     col_names = (
-        'Orig_halo_ID', 'M200b', 'R200b', 'pos', 'vel', 'Norb', 'LIDX', 'RIDX',
+        'Halo_ID', 'M200b', 'R200b', 'pos', 'vel', 'Norb', 'LIDX', 'RIDX',
         'INMB', 'cm', 'NSUBS', 'PID', 'SLIDX', 'SRIDX'
     )
     haloes = pd.DataFrame(columns=col_names)
@@ -388,7 +388,7 @@ def classify_single_mini_box(
     # Set particles' parent halo IDs.
     orb_pid_perc, orb_hid_perc = [], []
     col_names = (
-        'Orig_halo_ID', 'M200b', 'R200b', 'pos', 'vel', 'Norb', 'LIDX', 'RIDX',
+        'Halo_ID', 'M200b', 'R200b', 'pos', 'vel', 'Norb', 'LIDX', 'RIDX',
         'cm', 'NSUBS', 'PID', 'SLIDX', 'SRIDX'
     )
     haloes_perc = pd.DataFrame(columns=col_names)
@@ -417,7 +417,7 @@ def classify_single_mini_box(
             orb_hid_perc.append(new_orb_s)
 
             haloes_perc.loc[len(haloes_perc.index)] = [
-                haloes['Orig_halo_ID'][i],
+                haloes['Halo_ID'][i],
                 haloes['M200b'][i],
                 haloes['R200b'][i],
                 haloes['pos'][i],
@@ -463,7 +463,7 @@ def classify_single_mini_box(
                            dtype=np.dtype(pid[0]))
 
         # Seeds
-        hdf.create_dataset('memb/Orig_halo_ID', data=orb_hid_perc,
+        hdf.create_dataset('memb/Halo_ID', data=orb_hid_perc,
                            dtype=np.dtype(hid[0]))
 
     return None
@@ -542,16 +542,16 @@ def run_orbiting_mass_assignment(
             # Member data ======================================================
             # Number of particles in current file
             n_part_this = hdf_load['memb/PID'].shape[0]
-            n_seed_this = hdf_load['memb/Orig_halo_ID'].shape[0]
+            n_seed_this = hdf_load['memb/Halo_ID'].shape[0]
 
             # This reshaping of the dataset after every new file...
             if first_file:  # Create the dataset at first pass.
                 hdf_memb.create_dataset(name='PID',
                                         chunks=True, maxshape=(None,),
                                         data=hdf_load['memb/PID'][()])
-                hdf_memb.create_dataset(name='Orig_halo_ID',
+                hdf_memb.create_dataset(name='Halo_ID',
                                         chunks=True, maxshape=(None,),
-                                        data=hdf_load['memb/Orig_halo_ID'][()])
+                                        data=hdf_load['memb/Halo_ID'][()])
                 first_file = False
             else:
                 # Number of particles so far plus this file's total.
@@ -563,9 +563,9 @@ def run_orbiting_mass_assignment(
                 # Number of seeds so far plus this file's total.
                 new_shape = n_seed + n_seed_this
                 # Resize axes and save incoming data
-                hdf_memb['Orig_halo_ID'].resize((new_shape), axis=0)
-                hdf_memb['Orig_halo_ID'][n_seed:] = \
-                    hdf_load['memb/Orig_halo_ID'][()]
+                hdf_memb['Halo_ID'].resize((new_shape), axis=0)
+                hdf_memb['Halo_ID'][n_seed:] = \
+                    hdf_load['memb/Halo_ID'][()]
 
             # Halo data ========================================================
             for k, key in enumerate(halo_keys):
