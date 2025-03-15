@@ -60,8 +60,8 @@ def seed_data() -> tuple[np.ndarray]:
 
 def particle_data() -> tuple[np.ndarray]:
     # LOAD YOUR DATA HERE
-    hid, pos, vel = ()
-    return hid, pos, vel
+    pid, pos, vel = ()
+    return pid, pos, vel
 
 
 @timer(fancy=False)
