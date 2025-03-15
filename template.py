@@ -52,10 +52,22 @@ run_name = '<cool name>'        # OASIS appends this name to identify the run
 #                               OASIS sample run
 #
 # ==============================================================================
-@timer
-def process_seeds(data: tuple[np.ndarray]) -> None:
-    # Load your data
-    hid, pos, vel, r200b, m200b, rs = data
+def seed_data() -> tuple[np.ndarray]:
+    # LOAD YOUR DATA HERE
+    hid, pos, vel, m200b, r200b, rs = ()
+    return hid, pos, vel, m200b, r200b, rs
+
+
+def particle_data() -> tuple[np.ndarray]:
+    # LOAD YOUR DATA HERE
+    hid, pos, vel = ()
+    return hid, pos, vel
+
+
+@timer(fancy=False)
+def process_seeds() -> None:
+    # Load your data.
+    hid, pos, vel, r200b, m200b, rs = seed_data()
 
     # Additional properties to include in seed catalogue.
     props = [r200b, m200b, rs]
@@ -78,11 +90,12 @@ def process_seeds(data: tuple[np.ndarray]) -> None:
     return None
 
 
-@timer
-def process_particles(data: tuple[np.ndarray]) -> None:
-    # Load your data
-    pid, pos, vel = data
+@timer(fancy=False)
+def process_particles() -> None:
+    # Load your data.
+    pid, pos, vel = particle_data()
 
+    # Save particles into miniboxes according to their minibox ID.
     split_box_into_mini_boxes(
         positions=pos,
         velocities=vel,
@@ -97,11 +110,12 @@ def process_particles(data: tuple[np.ndarray]) -> None:
     return
 
 
-@timer
-def calibration(data: tuple[np.ndarray]) -> None:
+@timer(fancy=False)
+def calibration() -> None:
     # Load your data. No `rs` needed here.
-    hid, pos, vel, m200b, r200b, _ = data
+    *data, _ = seed_data()
 
+    # Calibrate OASIS
     calibrate(
         n_seeds=n_seeds,
         seed_data=data,
@@ -118,10 +132,10 @@ def calibration(data: tuple[np.ndarray]) -> None:
         n_threads=n_threads,
     )
 
-    return
+    return None
 
 
-@timer
+@timer(fancy=False)
 def run_oasis():
 
     run_orbiting_mass_assignment(
@@ -139,16 +153,12 @@ def run_oasis():
     return
 
 
-@timer
+@timer(fancy=False)
 def main():
 
-    # LOAD YOUR DATA HERE
-    seed_data = ()
-    particle_data = ()
-
-    process_seeds(data=seed_data)
-    process_particles(data=particle_data)
-    calibration(data=seed_data)
+    process_seeds()
+    process_particles()
+    calibration()
     run_oasis()
 
     return
