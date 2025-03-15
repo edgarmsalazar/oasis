@@ -71,6 +71,8 @@ def timer(
                 f"{F.WARNING}{dt}{F.ENDC}"
         else:
             label = f"\t Process: {procedure.__name__} \n" \
+                f"Start:  {start.strftime(fmt)} \n" \
+                f"Finish: {finish.strftime(fmt)} \n" \
                 f"{F.BULLET} Elapsed time: {dt}"
         if not off:
             print(label)
