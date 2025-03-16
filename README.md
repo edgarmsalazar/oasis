@@ -171,7 +171,7 @@ The `catalogue.hdf5` file contains the following columns:
 - `NSUBS`: number of orbiting seeds.
 - `PID`: parent dynamical halo ID. If the seed is orbiting another more massive halo, then `PID` is the `Halo_ID` of the parent halo, $-1$ otherwise.
 - `LIDX`, `RIDX`: row index in the `members.hdf5` file corresponding to the first ('left') and last ('right') member particle of the halo.
-- `SLIDX`, `SRIDX`: row index in the `members.hdf5` file corresponding to the first ('left') and last ('right') member seed of the halo.
+- `SLIDX`, `SRIDX`: row index in the `members.hdf5` file corresponding to the first ('left') and last ('right') member seed of the halo. If the halo has no orbiting seeds then both `SLIDX=-1` and `SRIDX=-1`.
 
 ### Halo Members Catalogue
 The `members.hdf5` file contains only two datasets:
