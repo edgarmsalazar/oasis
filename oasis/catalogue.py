@@ -478,6 +478,7 @@ def run_orbiting_mass_assignment(
     fast_mass: bool = False,
     part_mass: float = None,
     n_threads: int = None,
+    cleanup: bool = False,
 ) -> None:
     """Generates a halo catalogue using the kinetic mass criterion to classify
     particles into orbiting or infalling.
@@ -499,6 +500,8 @@ def run_orbiting_mass_assignment(
         for classification. Defaults to 5
     n_threads : int
         Number of threads, by default None
+    cleanup : bool
+        Removes individual minibox catalogues after contatenation.
 
     Returns
     -------
@@ -599,6 +602,12 @@ def run_orbiting_mass_assignment(
             if key in ['SLIDX', 'SRIDX']:
                 continue
             hdf.create_dataset(key, data=np.concatenate(halo_data[k]))
+
+    if cleanup:
+        path = load_path + f'run_{run_name}/mini_box_catalogues/'
+        for item in os.listdir(path):
+            os.remove(path + item)
+        os.removedirs(path)
 
     return None
 
