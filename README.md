@@ -3,6 +3,17 @@
 
 When using this code please cite Salazar et. al. (2025) ([arXiv:XXXX.XXXX]()).
 
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Usage](#usage)
+    - [User parameters](#user-parameters)
+    - [Prepare data](#step-1-prepare-data)
+    - [Calibration](#step-2-calibration)
+    - [Running Oasis](#step-3-run-orbiting-mass-assingment)
+- [Data products](#data-products)
+    - [Halo catalogue](#dynamical-halo-catalogue)
+    - [Members catalogue](#halo-members-catalogue)
+
 ## Requirements
 Create a conda environment. An `environment.yml` file is supplied as an example but feel free to use your own. It must include `mpi4py` and `python>=3.10`.
 ```sh
