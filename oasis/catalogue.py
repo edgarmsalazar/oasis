@@ -510,13 +510,14 @@ def run_orbiting_mass_assignment(
 
     # Number of miniboxes
     n_mini_boxes = np.int_(np.ceil(boxsize / minisize))**3
+    n_threads = np.min([n_threads, n_mini_boxes])
 
     # Parallel processing of miniboxes.
     func = partial(classify_single_mini_box, min_num_part=min_num_part,
                    boxsize=boxsize, load_path=load_path, minisize=minisize,
                    padding=padding, run_name=run_name, fast_mass=fast_mass,
                    part_mass=part_mass, disable_tqdm=True)
-
+    
     with Pool(n_threads) as pool, \
         tqdm(total=n_mini_boxes, colour="green", ncols=100,
              desc='Generating halo catalogue') as pbar:
