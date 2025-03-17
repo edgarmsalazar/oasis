@@ -1,4 +1,4 @@
-<!-- ![](res/oasis_logo_1.png "title") -->
+![](res/oasis.jpg "title")
 # Orbiting Mass Assignment Scheme
 
 When using this code please cite Salazar et. al. (2025) ([arXiv:XXXX.XXXX]()).
