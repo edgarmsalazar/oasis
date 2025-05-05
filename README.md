@@ -93,46 +93,71 @@ split_box_into_mini_boxes(
 The same function is used for particles with the only exception that `props=None` and `name='part'`.
 
 ### Step 2: Calibration
-Before running <span style="font-variant:small-caps;">Oasis</span> on the full volume, it needs to be calibrated. That is, it needs to find the cut line in $\ln\ v^2-r$ space that classifies particles into orbiting and infalling. Below are the parameters for the `calibrate` method and an example.
+Before running <span style="font-variant:small-caps;">Oasis</span> on the full volume, it needs to be calibrated. That is, it needs to find the cut line in $\ln\ v^2-r$ space that classifies particles into orbiting and infalling. This is only done once per the simulation box so subsequent runs of <span style="font-variant:small-caps;">Oasis</span> use the same calibration.
 
-- `n_seeds`: number of seeds to load (depends on mass resolution).
-- `r_max`: search radius in units of $h^{-1}{\rm Mpc}$. All particles within this radius will be collected for calibration.
-- `calib_p`: calibration parameter for $v_r>0$. Sets the target fraction of particles below the cut line. Defaults to $0.995$.
-- `calib_w`: calibration parameter for $v_r<0$. Sets the width of the band around the cut line. Defaults to $0.050$.
-- `calib_n_points`: number of gradient points to use when finding the slope of the cut line. Defaults to $20$.
-- `calib_grad_lims`: radial interval where the gradient points are taken from. Defaults to $(0.2, 0.5)$ in units of $r/R_{\rm 200b}$.
-- `n_threads`: number of multiprocessing threads to use. Speeds up loading seeds from each distinct minibox. Defaults to `None`.
+There are two options for calibrating the algorithm.
 
-> Input data order matters: ID, $\vec{x}$, $\vec{v}$, $M_{\rm 200b}$, $R_{\rm 200b}$.
+1. Assume cosmological dependence. The slope for the $v_r<0$ cut depends linearly on $\Omega_m$ as $$m_n = m_0 + m_1(\Omega_m-0.3)$$
+The other three calibration parameters are cosmology independent and are fixed to values found in Salazar et. al. (2025) ([arXiv:XXXX.XXXX]()) for the [Quijote](https://quijote-simulations.readthedocs.io/en/latest/) latin hypercube sample. 
+    
+    > **RESULTS MAY VARY**. While this choice reduces noise in mass function measurements across different cosmologies, it is recommended to do a sanity check against calibration directly on the data.
 
-```python
-from oasis.calibration import calibrate
+    The function call looks something like this
 
-data = (hid, pos, vel, m200b, r200b)
+    ```python
+    from oasis.calibration import calibrate
 
-calibrate(
-    n_seeds=n_seeds,
-    seed_data=data,
-    r_max=r_max,
-    boxsize=boxsize,
-    minisize=minisize,
-    save_path=save_path,
-    part_mass=part_mass,
-    rhom=rhom,
-    n_points=calib_n_points,
-    perc=calib_p,
-    width=calib_w,
-    grad_lims=calib_grad_lims,
-    n_threads=n_threads,
-)
-```
+    calibrate(
+        save_path=save_path,
+        omega_m=omega_m,
+    )
+    ```
 
+
+2. Use a sample of isolated haloes from the simulation data. This is part of the original pipeline but can introduce noise at the mass function level as it depends on the halo sample.
+ Below are the parameters for the `calibrate` method and an example.
+    - `n_seeds`: number of seeds to load (depends on mass resolution).
+    - `r_max`: search radius in units of $h^{-1}{\rm Mpc}$. All particles within this radius will be collected for calibration.
+    - `calib_p`: calibration parameter for $v_r>0$. Sets the target fraction of particles below the cut line. Defaults to $0.995$.
+    - `calib_w`: calibration parameter for $v_r<0$. Sets the width of the band around the cut line. Defaults to $0.050$.
+    - `calib_n_points`: number of gradient points to use when finding the slope of the cut line. Defaults to $20$.
+    - `calib_grad_lims`: radial interval where the gradient points are taken from. Defaults to $(0.2, 0.5)$ in units of $r/R_{\rm 200b}$.
+    - `n_threads`: number of multiprocessing threads to use. Speeds up loading seeds from each distinct minibox. Defaults to `None`.
+
+    > Input data order matters: ID, $\vec{x}$, $\vec{v}$, $M_{\rm 200b}$, $R_{\rm 200b}$.
+
+    In this case, the function call requires inputs as keyword arguments.
+    ```python
+    from oasis.calibration import calibrate
+
+    data = (hid, pos, vel, m200b, r200b)
+
+    calibrate(
+        save_path=save_path,
+        n_seeds=n_seeds,
+        seed_data=data,
+        r_max=r_max,
+        boxsize=boxsize,
+        minisize=minisize,
+        part_mass=part_mass,
+        rhom=rhom,
+        n_points=calib_n_points,
+        perc=calib_p,
+        width=calib_w,
+        grad_lims=calib_grad_lims,
+        n_threads=n_threads,
+    )
+    ```
+
+    This option uses multiple threads to search for the particles around the selected haloes. Depending on the number of haloes and mass resolution of the simulation it may take from a couple of seconds to a couple minutes ($<10$ min) per box.
 As a recommendation, always check that the calibration was done properly and makes sense before running the mass assignment. Here is the output of the previous function call.
 
 <img src="res/calibration.png" alt="calibration" class="center" height="300"/>
 
 ### Step 3: Run orbiting mass assingment
-Once calibrated, you can simply call `run_orbiting_mass_assignment` to generate a dynamical halo catalogue and the corresponding members catalogue. The additional parameters to set are:
+Once calibrated, you can simply call `run_orbiting_mass_assignment` to generate a dynamical halo catalogue and the corresponding members catalogue. This is the main algorithm and can be run many times with different `min_num_part` values, which are saved into different directories.
+
+The additional parameters to set are:
 
 - `n_orb_min`: only dynamical haloes with at least this number of orbiting particles will be considered.
 - `fast_mass`: when `True`,  <span style="font-variant:small-caps;">Oasis</span> will perform a simple percolation. It speeds things up but results are only comparable to the full percolation at the mass function level, i.e. members will differ from _true_ percolation and should only be set to `True` when there are hardware limitations. Defaults to `False`.

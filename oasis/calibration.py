@@ -377,7 +377,7 @@ def gradient_minima(
     return grad_r, grad_min
 
 
-def calibrate(
+def run_calibrate(
     n_seeds: int,
     seed_data: tuple[np.ndarray],
     r_max: float,
@@ -392,8 +392,7 @@ def calibrate(
     grad_lims: tuple[float] = (0.2, 0.5),
     n_threads: int = None,
 ) -> None:
-    """_summary_
-
+    """Runs calibration from isolated halo samples.
     Parameters
     ----------
     n_seeds : int
@@ -482,6 +481,40 @@ def calibrate(
         hdf.create_dataset('pos', data=[m_pos, b_pos])
         hdf.create_dataset('neg', data=[m_neg, b_neg])
 
+    return
+
+
+def calibrate(
+    save_path: str, 
+    omega_m: float = None, 
+    **kwargs,
+) -> None:
+    """Calibrates finder by assuming cosmology dependence. If `omega_m` is 
+    `None`, then it runs the calibration on the simulation data directly.
+
+    Parameters
+    ----------
+    save_path : str
+        Path to the mini boxes. Saves the calibration parameter in this directory.
+    omega_m : float, optional
+        Matter density parameter Omega matter, by default None.
+    **kwargs
+        See `run_calibrate` for parameter descriptions.
+    """
+    if omega_m:
+        # m_pos = -1.915
+        # b_pos = 1.863 - 0.4*m_pos
+        # m_neg = -1.592 + 0.696 * (omega_m - 0.3)
+        # b_neg = 0.892 - 0.4*(-1.592)
+        m_pos = -1.92
+        b_pos = 2.63
+        m_neg = -1.6 + 0.7 * (omega_m - 0.3)
+        b_neg = 1.55
+        with h5.File(save_path + 'calibration_pars.hdf5', 'w') as hdf:
+            hdf.create_dataset('pos', data=[m_pos, b_pos])
+            hdf.create_dataset('neg', data=[m_neg, b_neg])
+    else:
+        run_calibrate(save_path=save_path, **kwargs)
     return
 
 
