@@ -150,7 +150,6 @@ The other three calibration parameters are cosmology independent and are fixed t
     ```
 
     This option uses multiple threads to search for the particles around the selected haloes. Depending on the number of haloes and mass resolution of the simulation it may take from a couple of seconds to a couple minutes ($<10$ min) per box.
-
 As a recommendation, always check that the calibration was done properly and makes sense before running the mass assignment. Here is the output of the previous function call.
 
 <img src="res/calibration.png" alt="calibration" class="center" height="300"/>

@@ -393,7 +393,6 @@ def run_calibrate(
     n_threads: int = None,
 ) -> None:
     """Runs calibration from isolated halo samples.
-
     Parameters
     ----------
     n_seeds : int

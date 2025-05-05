@@ -123,7 +123,7 @@ def calibration() -> None:
 
     # OPTION 2 ======================================================
     # Calibrate finder on simulation data directly.
-    
+
     # Load your data. No `rs` needed here.
     *data, _ = seed_data()
 
