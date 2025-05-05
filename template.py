@@ -19,6 +19,7 @@ minisize: float = 100.                     # h^-1 Mpc
 padding: float = 5.                        # h^-1 Mpc
 rhom: float = 0.3 * 277_536_627_000.0      # h^-2 M_sun / Mpc^3
 part_mass: float = 77546570000.0           # h^-1 M_sun
+omega_m: float = 0.32                      # 
 
 # ==============================================================================
 #
@@ -112,17 +113,28 @@ def process_particles() -> None:
 
 @timer(fancy=False)
 def calibration() -> None:
+
+    # OPTION 1 ======================================================
+    # Assume cosmological dependence on calibration parameters.
+    calibrate(
+        save_path=save_path,
+        omega_m=omega_m,
+    )
+
+    # OPTION 2 ======================================================
+    # Calibrate finder on simulation data directly.
+    
     # Load your data. No `rs` needed here.
     *data, _ = seed_data()
 
     # Calibrate OASIS
     calibrate(
+        save_path=save_path,
         n_seeds=n_seeds,
         seed_data=data,
         r_max=r_max,
         boxsize=boxsize,
         minisize=minisize,
-        save_path=save_path,
         part_mass=part_mass,
         rhom=rhom,
         n_points=calib_n_points,
