@@ -114,7 +114,7 @@ The other three calibration parameters are cosmology independent and are fixed t
     ```
 
 
-2. Use a sample of isolated haloes from the simulation data. This is part of the original pipeline but introduces noise at the mass function level as it depends on the halo sample.
+2. Use a sample of isolated haloes from the simulation data. This is part of the original pipeline but can introduce noise at the mass function level as it depends on the halo sample.
  Below are the parameters for the `calibrate` method and an example.
     - `n_seeds`: number of seeds to load (depends on mass resolution).
     - `r_max`: search radius in units of $h^{-1}{\rm Mpc}$. All particles within this radius will be collected for calibration.
@@ -149,7 +149,7 @@ The other three calibration parameters are cosmology independent and are fixed t
     )
     ```
 
-    This option uses multiple threads to search for the particles around the selected haloes. Depending on the number of haloes and mass resolution of the simulation it may take a couple minutes (but $\sim 10$ min) per box.
+    This option uses multiple threads to search for the particles around the selected haloes. Depending on the number of haloes and mass resolution of the simulation it may take from a couple of seconds to a couple minutes ($<10$ min) per box.
 
 As a recommendation, always check that the calibration was done properly and makes sense before running the mass assignment. Here is the output of the previous function call.
 
