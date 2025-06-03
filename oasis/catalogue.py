@@ -43,7 +43,7 @@ def characteristic_density(
         raise ZeroDivisionError('Neither r200 nor rs can be zero.')
 
     c200 = r200 / rs
-    delta = ((200./3.) * c200) / (np.log(1 + c200) - (c200 / (1 + c200)))
+    delta = (200./3.) * (c200 ** 3 / (np.log(1 + c200) - (c200 / (1 + c200))))
 
     return delta
 
