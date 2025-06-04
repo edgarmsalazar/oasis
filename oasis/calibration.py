@@ -515,19 +515,24 @@ def calibrate(
         See `run_calibrate` for parameter descriptions.
     """
     if omega_m:
-        # m_pos = -1.915
-        # b_pos = 1.863 - 0.4*m_pos
-        # m_neg = -1.592 + 0.696 * (omega_m - 0.3)
-        # b_neg = 0.892 - 0.4*(-1.592)
-        m_pos = -1.92
-        b_pos = 2.63
-        m_neg = -1.6 + 0.7 * (omega_m - 0.3)
-        b_neg = 1.55
+        slope_pos = -1.915
+        b_pivot_pos = 1.664 + 0.74 * (omega_m - 0.3)
+
+        x0 = 0.5
+        slope_neg = -1.592 + 0.696 * (omega_m - 0.3)
+        b_pivot_neg = 0.8 + 0.525 * (omega_m - 0.3)
+        b_neg = b_pivot_neg - slope_neg * x0
+        gamma = 2.
+        alpha = (gamma - b_neg) / x0**2
+        beta = slope_neg - 2 * alpha * x0
+
         with h5.File(save_path + 'calibration_pars.hdf5', 'w') as hdf:
-            hdf.create_dataset('pos', data=[m_pos, b_pos])
-            hdf.create_dataset('neg', data=[m_neg, b_neg])
+            hdf.create_dataset('pos', data=[slope_pos, b_pivot_pos])
+            hdf.create_dataset('neg/line', data=[slope_neg, b_pivot_neg])
+            hdf.create_dataset('neg/quad', data=[alpha, beta, gamma])
     else:
         self_calibration(save_path=save_path, **kwargs)
+
     return
 
 
