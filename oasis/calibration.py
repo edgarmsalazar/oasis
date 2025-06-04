@@ -489,7 +489,7 @@ def self_calibration(
     beta = slope_neg - 2 * alpha * x0
     
 
-    with h5.File(save_path + 'calibration_pars_new.hdf5', 'w') as hdf:
+    with h5.File(save_path + 'calibration_pars.hdf5', 'w') as hdf:
         hdf.create_dataset('pos', data=[slope_pos, b_pivot_pos])
         hdf.create_dataset('neg/line', data=[slope_neg, b_pivot_neg])
         hdf.create_dataset('neg/quad', data=[alpha, beta, gamma])
