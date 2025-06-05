@@ -143,12 +143,13 @@ def classify(
     mask_vr_positive = np.sum(rel_vel * rel_pos, axis=1) > 0
 
     # Orbiting classification for vr > 0
-    mask_cut_pos = part_ln_vel < (m_pos * part_radius + b_pos)
+    line = m_pos * (part_radius - pivot_radius) + b_pos
+    mask_cut_pos = part_ln_vel < line
 
     # Orbiting classification for vr < 0
     mask_small_radius = part_radius <= pivot_radius
-    curve = alpha * part_radius**2 + beta * part_radius + gamma
-    line = m_neg * part_radius + b_neg
+    curve = alpha * part_radius ** 2 + beta * part_radius + gamma
+    line = m_neg * (part_radius - pivot_radius) + b_neg
 
     mask_cut_neg = ((part_ln_vel < curve) & mask_small_radius) ^ \
         ((part_ln_vel < line) & ~mask_small_radius)
