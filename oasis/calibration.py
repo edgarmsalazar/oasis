@@ -306,8 +306,9 @@ def cost_percentile(b: float, *data) -> float:
     -------
     float
     """
-    r, lnv2, slope, target = data
-    below_line = (lnv2 < (slope * r + b)).sum()
+    r, lnv2, slope, target, r0 = data
+    line = slope * (r - r0) + b
+    below_line = (lnv2 < line).sum()
     return np.log((target - below_line / r.shape[0]) ** 2)
 
 
@@ -327,8 +328,9 @@ def cost_perp_distance(b: float, *data) -> float:
     -------
     float
     """
-    r, lnv2, slope, width = data
-    d = np.abs(lnv2 - slope * r - b) / np.sqrt(1 + slope**2)
+    r, lnv2, slope, width, r0 = data
+    line = slope * (r - r0) + b
+    d = np.abs(lnv2 - line) / np.sqrt(1 + slope**2)
     return -np.log(np.mean(d[(d < width)] ** 2))
 
 
@@ -377,7 +379,7 @@ def gradient_minima(
     return grad_r, grad_min
 
 
-def calibrate(
+def self_calibration(
     n_seeds: int,
     seed_data: tuple[np.ndarray],
     r_max: float,
@@ -392,7 +394,7 @@ def calibrate(
     grad_lims: tuple[float] = (0.2, 0.5),
     n_threads: int = None,
 ) -> None:
-    """_summary_
+    """Runs calibration from isolated halo samples.
 
     Parameters
     ----------
@@ -439,48 +441,97 @@ def calibrate(
 
     mask_vr_neg = (vr < 0)
     mask_vr_pos = ~mask_vr_neg
-    mask_r = r < 2.0
+    mask_r = r <= 2.0
+    x0 = 0.5
 
     # For vr > 0 ===============================================================
     r_grad, min_grad = gradient_minima(r, lnv2, mask_vr_pos, n_points, 
                                        *grad_lims)
     # Find slope by fitting to the minima.
-    popt, _ = curve_fit(lambda x, m, b: m * x + b, r_grad, min_grad, p0=[-1, 2])
-    m_pos, b01 = popt
+    popt, _ = curve_fit(lambda x, m, b: m * (x - x0) + b, r_grad, min_grad, 
+                        p0=[-1, 2], bounds=((-5, 0), (0, 5)))
+    slope_pos, pivot_0 = popt
 
     # Find intercept by finding the value that contains 'perc' percent of
     # particles below the line at fixed slope 'm_pos'.
     res = minimize(
-        cost_percentile,
-        1.1 * b01,
-        bounds=((0.8 * b01, 3.0),),
-        args=(r[mask_vr_pos * mask_r], lnv2[mask_vr_pos * mask_r], m_pos, perc),
+        fun=cost_percentile,
+        x0=1.1 * pivot_0,
+        bounds=((pivot_0, 5.0),),
+        args=(r[mask_vr_pos&mask_r], lnv2[mask_vr_pos&mask_r], slope_pos, perc, x0),
         method='Nelder-Mead',
     )
-    b_pos = res.x[0]
+    b_pivot_pos = res.x[0]
 
     # For vr < 0 ===============================================================
     r_grad, min_grad = gradient_minima(r, lnv2, mask_vr_neg, n_points, 
                                        *grad_lims)
     # Find slope by fitting to the minima.
-    popt, _ = curve_fit(lambda x, m, b: m * x + b, r_grad, min_grad, p0=[-1, 2])
-    m_neg, b02 = popt
+    popt, _ = curve_fit(lambda x, m, b: m * (x - x0) + b, r_grad, min_grad, 
+                        p0=[-1, 2], bounds=((-5, 0), (0, 3)))
+    slope_neg, pivot_1 = popt
 
     # Find intercept by finding the value that maximizes the perpendicular
     # distance to the line at fixed slope of all points within a perpendicular
     # 'width' distance from the line (ignoring all others).
     res = minimize(
-        cost_perp_distance,
-        0.75 * b02,
-        bounds=((1.2, b02),),
-        args=(r[mask_vr_neg], lnv2[mask_vr_neg], m_neg, width),
+        fun=cost_perp_distance,
+        x0=0.8 * pivot_1,
+        bounds=((0.5 * pivot_1, pivot_1),),
+        args=(r[mask_vr_neg], lnv2[mask_vr_neg], slope_neg, width, x0),
         method='Nelder-Mead',
     )
-    b_neg = res.x[0]
+    b_pivot_neg = res.x[0]
+    
+    b_neg = b_pivot_neg - slope_neg * x0
+    gamma = 2.
+    alpha = (gamma - b_neg) / x0**2
+    beta = slope_neg - 2 * alpha * x0
+    
 
     with h5.File(save_path + 'calibration_pars.hdf5', 'w') as hdf:
-        hdf.create_dataset('pos', data=[m_pos, b_pos])
-        hdf.create_dataset('neg', data=[m_neg, b_neg])
+        hdf.create_dataset('pos', data=[slope_pos, b_pivot_pos])
+        hdf.create_dataset('neg/line', data=[slope_neg, b_pivot_neg])
+        hdf.create_dataset('neg/quad', data=[alpha, beta, gamma])
+
+    return
+
+
+def calibrate(
+    save_path: str, 
+    omega_m: float = None, 
+    **kwargs,
+) -> None:
+    """Calibrates finder by assuming cosmology dependence. If `omega_m` is 
+    `None`, then it runs the calibration on the simulation data directly.
+
+    Parameters
+    ----------
+    save_path : str
+        Path to the mini boxes. Saves the calibration parameter in this directory.
+    omega_m : float, optional
+        Matter density parameter Omega matter, by default None.
+    **kwargs
+        See `run_calibrate` for parameter descriptions.
+    """
+    if omega_m:
+        slope_pos = -1.915
+        b_pivot_pos = 1.664 + 0.74 * (omega_m - 0.3)
+
+        x0 = 0.5
+        slope_neg = -1.592 + 0.696 * (omega_m - 0.3)
+        b_pivot_neg = 0.8 + 0.525 * (omega_m - 0.3)
+        b_neg = b_pivot_neg - slope_neg * x0
+        gamma = 2.
+        alpha = (gamma - b_neg) / x0**2
+        beta = slope_neg - 2 * alpha * x0
+
+        with h5.File(save_path + 'calibration_pars.hdf5', 'w') as hdf:
+            hdf.create_dataset('pos', data=[slope_pos, b_pivot_pos])
+            hdf.create_dataset('neg/line', data=[slope_neg, b_pivot_neg])
+            hdf.create_dataset('neg/quad', data=[alpha, beta, gamma])
+    else:
+        self_calibration(save_path=save_path, **kwargs)
 
     return
 

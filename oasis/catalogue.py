@@ -43,7 +43,7 @@ def characteristic_density(
         raise ZeroDivisionError('Neither r200 nor rs can be zero.')
 
     c200 = r200 / rs
-    delta = ((200./3.) * c200) / (np.log(1 + c200) - (c200 / (1 + c200)))
+    delta = (200./3.) * (c200 ** 3 / (np.log(1 + c200) - (c200 / (1 + c200))))
 
     return delta
 
@@ -102,7 +102,8 @@ def classify(
     r200: float,
     m200: float,
     class_pars: list | tuple | np.ndarray,
-    max_radius: float = 2.0
+    max_radius: float = 2.0,
+    pivot_radius: float = 0.5
 ) -> np.ndarray:
     """Classifies particles as orbiting.
 
@@ -121,13 +122,16 @@ def classify(
     max_radius : float
         Maximum radius where orbiting particles can be found. All particles 
         above this value are set to be infalling. By default 2.0.
+    pivot_radius : float
+        Pivot value for the cut transition from linear to quadratic. By default
+        0.5.
 
     Returns
     -------
     np.ndarray
         A boolean array where True == orbiting
     """
-    m_pos, b_pos, m_neg, b_neg = class_pars
+    m_pos, b_pos, m_neg, b_neg, alpha, beta, gamma = class_pars
     # Compute V200
     v200 = G_gravity * m200 / r200
 
@@ -139,10 +143,16 @@ def classify(
     mask_vr_positive = np.sum(rel_vel * rel_pos, axis=1) > 0
 
     # Orbiting classification for vr > 0
-    mask_cut_pos = part_ln_vel < (m_pos * part_radius + b_pos)
+    line = m_pos * (part_radius - pivot_radius) + b_pos
+    mask_cut_pos = part_ln_vel < line
 
     # Orbiting classification for vr < 0
-    mask_cut_neg = part_ln_vel < (m_neg * part_radius + b_neg)
+    mask_small_radius = part_radius <= pivot_radius
+    curve = alpha * part_radius ** 2 + beta * part_radius + gamma
+    line = m_neg * (part_radius - pivot_radius) + b_neg
+
+    mask_cut_neg = ((part_ln_vel < curve) & mask_small_radius) ^ \
+        ((part_ln_vel < line) & ~mask_small_radius)
 
     # Particle is infalling if it is below both lines and 2*R00
     mask_orb = (part_radius <= max_radius) & (
@@ -225,7 +235,7 @@ def classify_single_mini_box(
 
     # Load calibration parameters
     with h5.File(load_path + 'calibration_pars.hdf5', 'r') as hdf:
-        pars = (*hdf['pos'][()], *hdf['neg'][()])
+        pars = (*hdf['pos'][()], *hdf['neg/line'][()], *hdf['neg/quad'][()])
 
     col_names = (
         'Halo_ID', 'M200b', 'R200b', 'pos', 'vel', 'Norb', 'LIDX', 'RIDX',
@@ -289,8 +299,7 @@ def classify_single_mini_box(
             if fast_mass:
                 rel_vel_seed = vel_seed - vel_seed[i]
                 mask_orb_sub = classify(rel_pos_seed[i+1:][mask_seed],
-                                        rel_vel_seed[i +
-                                                     1:][mask_seed], r200b[i],
+                                        rel_vel_seed[i+1:][mask_seed], r200b[i],
                                         m200b[i], pars)
                 if mask_orb_sub.sum() > 0:
                     for item in hid[i+1:][mask_seed][mask_orb_sub]:
@@ -387,7 +396,7 @@ def classify_single_mini_box(
     # Set particles' parent halo IDs.
     orb_pid_perc, orb_hid_perc = [], []
     col_names = (
-        'Halo_ID', 'M200b', 'R200b', 'pos', 'vel', 'Norb', 'LIDX', 'RIDX',
+        'Halo_ID', 'M200b', 'R200b', 'pos', 'vel', 'Morb', 'Norb', 'LIDX', 'RIDX',
         'cm', 'NSUBS', 'PID', 'SLIDX', 'SRIDX'
     )
     haloes_perc = pd.DataFrame(columns=col_names)
@@ -421,6 +430,7 @@ def classify_single_mini_box(
                 haloes['R200b'][i],
                 haloes['pos'][i],
                 haloes['vel'][i],
+                n_orb * part_mass,
                 n_orb,
                 n_tot_perc,
                 n_tot_perc + n_orb,
@@ -444,9 +454,9 @@ def classify_single_mini_box(
 
     # Save into file
     dtypes = (
-        np.uint32, np.float32, np.float32, np.float32, np.float32, np.uint32,
-        np.uint32, np.uint32, np.float32, np.uint16, np.int32, np.uint32,
-        np.uint32
+        np.uint32, np.float32, np.float32, np.float32, np.float32, np.float32,
+        np.uint32, np.uint32, np.uint32, np.float32, np.uint16, np.int32, 
+        np.uint32, np.uint32
     )
     with h5.File(save_path + f'{mini_box_id}.hdf5', 'w') as hdf:
         # Halo catalogue
