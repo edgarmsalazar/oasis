@@ -388,6 +388,7 @@ def self_calibration(
     save_path: str,
     part_mass: float,
     rhom: float,
+    redshift: float = 0,
     n_points: int = 20,
     perc: float = 0.995,
     width: float = 0.05,
@@ -414,6 +415,8 @@ def self_calibration(
         Mass per particle
     rhom : float
         Mass density of the universe
+    redshift : float
+        Cosmological redshift, defaults to 0
     n_points : int, optional
         Number of minima points to compute, by default 20
     perc : float, optional
@@ -442,15 +445,36 @@ def self_calibration(
     mask_vr_neg = (vr < 0)
     mask_vr_pos = ~mask_vr_neg
     mask_r = r <= 2.0
-    x0 = 0.5
+    if redshift:
+        x0 = 1.2
+    else:
+        x0 = 0.5
 
     # For vr > 0 ===============================================================
-    r_grad, min_grad = gradient_minima(r, lnv2, mask_vr_pos, n_points, 
-                                       *grad_lims)
-    # Find slope by fitting to the minima.
-    popt, _ = curve_fit(lambda x, m, b: m * (x - x0) + b, r_grad, min_grad, 
-                        p0=[-1, 2], bounds=((-5, 0), (0, 5)))
-    slope_pos, pivot_0 = popt
+    if redshift:
+        # Find peak of the distribution
+        hist, hx, hy = np.histogram2d(r[mask_vr_pos], lnv2[mask_vr_pos], 
+                                      bins=(n_points, 100), 
+                                      range=(grad_lims, (0, 3)))
+        peak_r = 0.5 * (hx[:-1] + hx[1:])
+        peak_loc = (0.5 * (hy[:-1] + hy[1:]))[np.argmax(hist, axis=1)]
+        slope_init = np.mean(
+            (np.diff(peak_loc)/np.diff(peak_r))[int(n_points*2/3):]
+        )
+        if np.abs(-2 - slope_init) > 1.:
+            slope_init = -2
+        # Fit a line to the peak as a function of r
+        popt, _ = curve_fit(lambda x, m, b: m * (x - x0) + b, peak_r, peak_loc,
+                            p0=[slope_init, 2], bounds=((-5, -0.5), (0, 5)))
+        slope_pos, pivot_0 = popt
+        
+    else:
+        r_grad, min_grad = gradient_minima(r, lnv2, mask_vr_pos, n_points, 
+                                            *grad_lims)
+        # Find slope by fitting to the minima.
+        popt, _ = curve_fit(lambda x, m, b: m * (x - x0) + b, r_grad, min_grad, 
+                            p0=[-1, 2], bounds=((-5, 0), (0, 5)))
+        slope_pos, pivot_0 = popt
 
     # Find intercept by finding the value that contains 'perc' percent of
     # particles below the line at fixed slope 'm_pos'.
@@ -458,18 +482,36 @@ def self_calibration(
         fun=cost_percentile,
         x0=1.1 * pivot_0,
         bounds=((pivot_0, 5.0),),
-        args=(r[mask_vr_pos&mask_r], lnv2[mask_vr_pos&mask_r], slope_pos, perc, x0),
+        args=(r[mask_vr_pos & mask_r], lnv2[mask_vr_pos & mask_r], 
+              slope_pos, perc, x0),
         method='Nelder-Mead',
     )
     b_pivot_pos = res.x[0]
 
     # For vr < 0 ===============================================================
-    r_grad, min_grad = gradient_minima(r, lnv2, mask_vr_neg, n_points, 
-                                       *grad_lims)
-    # Find slope by fitting to the minima.
-    popt, _ = curve_fit(lambda x, m, b: m * (x - x0) + b, r_grad, min_grad, 
-                        p0=[-1, 2], bounds=((-5, 0), (0, 3)))
-    slope_neg, pivot_1 = popt
+    if redshift:
+        # Find peak of the distribution
+        hist, hx, hy = np.histogram2d(r[mask_vr_neg], lnv2[mask_vr_neg], 
+                                      bins=(n_points, 100), 
+                                      range=(grad_lims, (0, 3)))
+        peak_r = 0.5 * (hx[:-1] + hx[1:])
+        peak_loc = (0.5 * (hy[:-1] + hy[1:]))[np.argmax(hist, axis=1)]
+        slope_init = np.mean(
+            (np.diff(peak_loc)/np.diff(peak_r))[int(n_points*2/3):]
+        )
+        if np.abs(-2 - slope_init) > 1.:
+            slope_init = -2
+        # Fit a line to the peak as a function of r
+        popt, _ = curve_fit(lambda x, m, b: m * (x - x0) + b, peak_r, peak_loc,
+                            p0=[slope_init, 2], bounds=((-5, -0.5), (0, 5)))
+        slope_neg, pivot_1 = popt
+    else:
+        r_grad, min_grad = gradient_minima(r, lnv2, mask_vr_neg, n_points, 
+                                        *grad_lims)
+        # Find slope by fitting to the minima.
+        popt, _ = curve_fit(lambda x, m, b: m * (x - x0) + b, r_grad, min_grad, 
+                            p0=[-1, 2], bounds=((-5, 0), (0, 3)))
+        slope_neg, pivot_1 = popt
 
     # Find intercept by finding the value that maximizes the perpendicular
     # distance to the line at fixed slope of all points within a perpendicular
@@ -487,7 +529,6 @@ def self_calibration(
     gamma = 2.
     alpha = (gamma - b_neg) / x0**2
     beta = slope_neg - 2 * alpha * x0
-    
 
     with h5.File(save_path + 'calibration_pars.hdf5', 'w') as hdf:
         hdf.create_dataset('pos', data=[slope_pos, b_pivot_pos])
