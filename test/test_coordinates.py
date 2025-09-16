@@ -78,13 +78,13 @@ def test_relative_coordinates():
 
 
 def test_get_vr_vt_from_coordinates():
-
+    # Single particle, mismatched shape (should raise)
     x = numpy.array([1., 1., 1.])
     v = numpy.array([1., 1., -1.])
-
     with pytest.raises(ValueError):
         coordinates.velocity_components(x, v)
 
+    # Single particle, correct shape
     x = numpy.array([x])
     v = numpy.array([v])
     vr, vt, v2 = coordinates.velocity_components(x, v)
@@ -98,5 +98,35 @@ def test_get_vr_vt_from_coordinates():
     assert vt[0] == pytest.approx(vt_expected)
     assert v2[0] == 3.
 
+    # Zero velocity vector
+    x = numpy.array([[2., 0., 0.]])
+    v = numpy.array([[0., 0., 0.]])
+    vr, vt, v2 = coordinates.velocity_components(x, v)
+    assert vr[0] == pytest.approx(0.)
+    assert vt[0] == pytest.approx(0.)
+    assert v2[0] == pytest.approx(0.)
 
-###
+    # # Zero position vector (should raise or handle gracefully)
+    # x = numpy.array([[0., 0., 0.]])
+    # v = numpy.array([[1., 0., 0.]])
+    # with pytest.raises(Exception):
+    #     coordinates.velocity_components(x, v)
+
+    # Multiple particles
+    x = numpy.array([[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]])
+    v = numpy.array([[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]])
+    vr, vt, v2 = coordinates.velocity_components(x, v)
+    assert vr.shape == (3,)
+    assert vt.shape == (3,)
+    assert v2.shape == (3,)
+    assert all(isinstance(val, float) or isinstance(val, numpy.floating) for val in vr)
+    assert all(isinstance(val, float) or isinstance(val, numpy.floating) for val in vt)
+    assert all(isinstance(val, float) or isinstance(val, numpy.floating) for val in v2)
+
+    # Negative coordinates and velocities
+    x = numpy.array([[-1., -1., -1.]])
+    v = numpy.array([[-1., -1., 1.]])
+    vr, vt, v2 = coordinates.velocity_components(x, v)
+    assert vr.shape == (1,)
+    assert vt.shape == (1,)
+    assert v2.shape == (1,)

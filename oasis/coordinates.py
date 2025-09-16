@@ -142,30 +142,17 @@ def velocity_components(
                          'reshape array to match 2D.')
 
     # Transform coordinates from cartesian to spherical
-    #   rs = sqrt( x**2 + y**2 + z**2 )
     rps = np.sqrt(np.sum(np.square(pos), axis=1))
-    #   theta = arccos( z / rs )
-    thetas = np.arccos(pos[:, 2] / rps)
-    #   phi = arctan( y / x)
-    phis = np.arctan2(pos[:, 1], pos[:, 0])
-
-    # Get radial vector in cartesian coordinates
-    rp_hat = np.zeros_like(pos)
-    rp_hat[:, 0] = np.sin(thetas) * np.cos(phis)
-    rp_hat[:, 1] = np.sin(thetas) * np.sin(phis)
-    rp_hat[:, 2] = np.cos(thetas)
-
-    # Get tangential vector in cartesian coordinates
-    rt_hat = np.zeros_like(pos)
-    rt_hat[:, 0] = np.cos(thetas) * np.cos(phis)
-    rt_hat[:, 1] = np.cos(thetas) * np.sin(phis)
-    rt_hat[:, 2] = -np.sin(thetas)
+    rp_hat = pos / rps
 
     # Compute radial velocity as v dot r_hat
     vr = np.sum(vel * rp_hat, axis=1)
-    vt = np.sum(vel * rt_hat, axis=1)
+
     # Velocity squared
     v2 = np.sum(np.square(vel), axis=1)
+
+    # Compute perpendicular velocity component as v^2 - vr^2
+    vt = np.sqrt(v2 - np.square(vr))
 
     return vr, vt, v2
 
