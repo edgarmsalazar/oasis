@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import List, Optional, Tuple, Union
 
 import h5py
@@ -62,6 +63,52 @@ def _validate_inputs_box_partitioning(positions, velocities, uid, props):
             if arr.shape[0] != n_particles:
                 raise ValueError(
                     f"props array {i} must have {n_particles} elements")
+
+
+def _validate_load_inputs(
+    mini_box_id: int,
+    boxsize: float,
+    minisize: float,
+    load_path: str,
+    padding: float,
+) -> None:
+    """Validate inputs for load functions."""
+    # Validate mini_box_id
+    if not isinstance(mini_box_id, (int, numpy.integer)):
+        raise TypeError("mini_box_id must be an integer")
+
+    _validate_inputs_boxsize_minisize(boxsize, minisize)
+
+    # Validate mini_box_id is within valid range
+    cells_per_side = int(numpy.ceil(boxsize / minisize))
+    total_mini_boxes = cells_per_side**3
+    if mini_box_id < 0:
+        raise ValueError(f"mini_box_id must be non-negative, got {mini_box_id}")
+    if mini_box_id >= total_mini_boxes:
+        raise ValueError(
+            f"mini_box_id {mini_box_id} exceeds maximum valid ID {total_mini_boxes - 1} "
+            f"for grid with {cells_per_side}³ = {total_mini_boxes} mini-boxes"
+        )
+    
+    mini_box_id = int(mini_box_id)
+    if mini_box_id < 0:
+        raise ValueError("mini_box_id must be non-negative")
+    
+    # Validate padding
+    if not isinstance(padding, (int, float, numpy.number)):
+        raise TypeError("padding must be numeric")
+    if padding < 0:
+        raise ValueError("padding must be non-negative")
+    
+    # Validate load_path
+    if not isinstance(load_path, (str, Path)):
+        raise TypeError("load_path must be a string or Path object")
+    
+    load_path = Path(load_path)
+    if not load_path.exists():
+        raise FileNotFoundError(f"Load path does not exist: {load_path}")
+    if not load_path.is_dir():
+        raise NotADirectoryError(f"Load path is not a directory: {load_path}")
 
 
 def get_mini_box_id(
@@ -491,39 +538,118 @@ def split_simulation_into_mini_boxes(
 
 
 def load_particles(
-    mini_box_id: int,
+    mini_box_id: Union[int, numpy.integer],
     boxsize: float,
     minisize: float,
-    load_path: str,
+    load_path: Union[str, Path],
     padding: float = 5.0,
-) -> Tuple[numpy.ndarray]:
-    """Load particles from a mini box including all particles in adjacent boxes 
-    up to the `padding` distance.
-
+) -> Tuple[numpy.ndarray, numpy.ndarray, numpy.ndarray]:
+    """
+    Load particles from a mini box and its adjacent neighbors within padding distance.
+    
+    This function loads particle data (positions, velocities, IDs) from a specified 
+    mini box and all 26 neighboring mini boxes, then filters particles to only 
+    include those within a specified padding distance from the target mini box edges.
+    This is useful for analysis that requires particles near box boundaries to avoid
+    edge effects.
+    
     Parameters
     ----------
-    mini_box_id : int
-        Sub-box ID
-    load_path : str
-        Location from where to load the file
+    mini_box_id : int or numpy.integer
+        ID of the target mini box from which to load particles. Must be a valid
+        mini box ID for the given box configuration.
     boxsize : float
-        Size of simulation box
-    minisize : float
-        Size of mini box
-    padding : float
-        Only particles up to this distance from the mini box edge are considered 
-        for classification. Defaults to 5.
-
+        Size of the full simulation box in simulation units. Must be positive.
+    minisize : float  
+        Size of each cubic mini box in simulation units. Must be positive and
+        typically smaller than boxsize.
+    load_path : str or Path
+        Path to directory containing the mini box HDF5 files. The directory
+        should contain a subdirectory named 'mini_boxes_nside_{N}/' where N
+        is the number of cells per side.
+    padding : float, optional
+        Maximum distance from mini box edges to include particles, in simulation 
+        units. Particles further than this distance from any edge of the target
+        mini box will be excluded. Must be non-negative. Default is 5.0.
+        
     Returns
     -------
-    Tuple[numpy.ndarray]
-        Position, velocity, and PID
+    positions : numpy.ndarray
+        Particle positions with shape (n_particles, 3) containing Cartesian
+        coordinates of particles within the padding distance.
+    velocities : numpy.ndarray  
+        Particle velocities with shape (n_particles, 3) containing Cartesian
+        velocity components corresponding to the returned positions.
+    particle_ids : numpy.ndarray
+        Particle IDs with shape (n_particles,) containing unique identifiers
+        corresponding to the returned positions and velocities.
+        
+    Raises
+    ------
+    TypeError
+        If mini_box_id is not an integer, boxsize/minisize/padding are not numeric,
+        or load_path is not a string/Path.
+    ValueError
+        If mini_box_id is negative or invalid for the grid, boxsize/minisize are
+        non-positive, minisize > boxsize, or padding is negative.
+    FileNotFoundError
+        If load_path doesn't exist or required mini box files are missing.
+    NotADirectoryError
+        If load_path is not a directory.
+    OSError
+        If HDF5 files cannot be read or are corrupted.
+    RuntimeError
+        If loaded data is inconsistent or if no particles are found.
+        
+    Notes
+    -----
+    - Uses periodic boundary conditions when calculating relative coordinates
+    - Loads from all 27 mini boxes (target + 26 neighbors) to ensure complete
+      coverage within padding distance
+    - Memory usage scales with the number of particles in the 27 mini boxes
+    
+    Examples
+    --------
+    >>> positions, velocities, ids = load_particles(
+    ...     mini_box_id=42,
+    ...     boxsize=100.0,
+    ...     minisize=10.0,
+    ...     load_path="/data/simulation/",
+    ...     padding=2.0
+    ... )
+    >>> print(f"Loaded {len(positions)} particles")
+    
+    >>> # Load without progress bars for batch processing
+    >>> pos, vel, ids = load_particles(
+    ...     mini_box_id=0, boxsize=50.0, minisize=5.0,
+    ...     load_path="./mini_boxes/", padding=1.0,
+    ... )
+        
+    See Also
+    --------
+    get_mini_box_center : Get center coordinates of a mini box
+    get_adjacent_mini_box_ids : Get IDs of neighboring mini boxes
+    split_simulation_into_mini_boxes : Create mini box files
     """
-    # Determine number of partitions per side
-    cells_per_side = numpy.int_(numpy.ceil(boxsize / minisize))
+    # Input validation
+    _validate_load_inputs(mini_box_id, boxsize, minisize, load_path, padding)
 
-    # Generate the IDs and positions of the mini box grid
-    grid_ids, grid_pos = generate_mini_box_grid(boxsize, minisize)
+    # Determine number of partitions per side
+    cells_per_side = int(numpy.ceil(boxsize / minisize))
+
+    # Calculate center coordinates. Grid cells start at (0,0,0) with size 
+    # minisize. Convert 1D ID to 3D grid coordinates (i, j, k). 
+    # Using the mapping: ID = k + j*cells_per_side + i*cells_per_side²
+    i = mini_box_id // (cells_per_side**2)
+    remainder = mini_box_id % (cells_per_side**2)
+    j = remainder // cells_per_side
+    k = remainder % cells_per_side
+    
+    center = numpy.array([
+        (k + 0.5) * minisize,
+        (j + 0.5) * minisize,
+        (i + 0.5) * minisize
+    ])
 
     # Get the adjacent mini box IDs
     mini_box_ids = get_adjacent_mini_box_ids(
@@ -533,31 +659,38 @@ def load_particles(
     )
 
     # Create empty lists (containers) to save the data from file for each ID
-    pos, vel, pid = ([] for _ in range(3))
+    positions, velocities, ids = ([] for _ in range(3))
 
     # Load all adjacent boxes
     for i, mini_box in enumerate(mini_box_ids):
         file_name = f'mini_boxes_nside_{cells_per_side}/{mini_box}.hdf5'
         with h5py.File(load_path + file_name, 'r') as hdf:
-            pos.append(hdf['part/pos'][()])
-            vel.append(hdf['part/vel'][()])
-            pid.append(hdf['part/ID'][()])
+            positions.append(hdf['part/pos'][()])
+            velocities.append(hdf['part/vel'][()])
+            ids.append(hdf['part/ID'][()])
 
-    # Concatenate into a single array
-    pos = numpy.concatenate(pos)
-    vel = numpy.concatenate(vel)
-    pid = numpy.concatenate(pid)
+    # Concatenate all loaded data into single arrays
+    positions = numpy.concatenate(positions)
+    velocities = numpy.concatenate(velocities)
+    ids = numpy.concatenate(ids)
 
     # Mask particles within a padding distance of the edge of the box in each
     # direction
-    loc_id = grid_ids == mini_box_id
     padded_distance = 0.5 * minisize + padding
     absolute_rel_pos = numpy.abs(
-        relative_coordinates(pos, grid_pos[loc_id], boxsize, periodic=True)
+        relative_coordinates(positions, center, boxsize, periodic=True)
     )
     mask = numpy.prod(absolute_rel_pos <= padded_distance, axis=1, dtype=bool)
 
-    return pos[mask], vel[mask], pid[mask]
+    # Final validation
+    n_loaded = len(positions)
+    if n_loaded == 0:
+        raise RuntimeError(
+            f"No particles found within padding distance {padding} "
+            f"of mini box {mini_box_id}"
+        )
+    
+    return positions[mask], velocities[mask], ids[mask]
 
 
 def load_seeds(
@@ -567,33 +700,106 @@ def load_seeds(
     load_path: str,
     padding: float = 5.0,
 ) -> Tuple[numpy.ndarray]:
-    """Load seeds from a mini box
+    """
+    Load seeds from a mini box and its adjacent neighbors within padding distance.
+    
+    This function loads seed data (positions, velocities, IDs, r200, m200, rs, mask) 
+    from a specified mini box and all 26 neighboring mini boxes, then filters seeds 
+    to only include those within a specified padding distance from the target 
+    mini box edges. This is useful for analysis that requires particles near box 
+    boundaries to avoid edge effects.
+
+    An additional boolean mask is returned indicating which seeds are located in
+    the target mini box versus the neighboring boxes.
+
+    The returned arrays are sorted in descending order by m200.
 
     Parameters
     ----------
-    mini_box_id : int
-        Sub-box ID
+    mini_box_id : int or numpy.integer
+        ID of the target mini box from which to load particles. Must be a valid
+        mini box ID for the given box configuration.
     boxsize : float
-        Size of simulation box
-    minisize : float
-        Size of mini box
-    load_path : str
-        Location from where to load the file
-    padding : float
-        Only particles up to this distance from the mini box edge are considered 
-        for classification. Defaults to 5
+        Size of the full simulation box in simulation units. Must be positive.
+    minisize : float  
+        Size of each cubic mini box in simulation units. Must be positive and
+        typically smaller than boxsize.
+    load_path : str or Path
+        Path to directory containing the mini box HDF5 files. The directory
+        should contain a subdirectory named 'mini_boxes_nside_{N}/' where N
+        is the number of cells per side.
+    padding : float, optional
+        Maximum distance from mini box edges to include particles, in simulation 
+        units. Particles further than this distance from any edge of the target
+        mini box will be excluded. Must be non-negative. Default is 5.0.
 
     Returns
     -------
-    Tuple[numpy.ndarray]
-        Position, velocity, ID, R200b, M200b, Rs and a mask for seeds in the 
-        minibox.
-    """
-    # Determine number of partitions per side
-    cells_per_side = numpy.int_(numpy.ceil(boxsize / minisize))
+    positions : numpy.ndarray
+        Particle positions with shape (n_particles, 3) containing Cartesian
+        coordinates of particles within the padding distance.
+    velocities : numpy.ndarray  
+        Particle velocities with shape (n_particles, 3) containing Cartesian
+        velocity components corresponding to the returned positions.
+    particle_ids : numpy.ndarray
+        Particle IDs with shape (n_particles,) containing unique identifiers
+        corresponding to the returned positions and velocities.
+    r200 : numpy.ndarray
+        R200 values with shape (n_particles,) corresponding to the standard halo
+        boundary defined by 200 times the critical density.
+    m200 : numpy.ndarray
+        M200 values with shape (n_particles,) corresponding to the standard halo
+        boundary defined by 200 times the critical density.
+    rs : numpy.ndarray
+        Scale radius values with shape (n_particles,) corresponding to the NFW
+        profile scale radius fit by Rockstar.
+    mini_box_mask : numpy.ndarray
+        Boolean mask with shape (n_particles,) indicating which seeds are located
+        in the target mini box (True) versus neighboring boxes (False).
+    
+    Raises
+    ------
+    TypeError
+        If mini_box_id is not an integer, boxsize/minisize/padding are not numeric,
+        or load_path is not a string/Path.
+    ValueError
+        If mini_box_id is negative or invalid for the grid, boxsize/minisize are
+        non-positive, minisize > boxsize, or padding is negative.
+    FileNotFoundError
+        If load_path doesn't exist or required mini box files are missing.
+    NotADirectoryError
+        If load_path is not a directory.
+    OSError
+        If HDF5 files cannot be read or are corrupted.
+    RuntimeError
+        If loaded data is inconsistent or if no particles are found.
 
-    # Generate the IDs and positions of the mini box grid
-    grid_ids, grid_pos = generate_mini_box_grid(boxsize, minisize)
+    Notes
+    -----
+    - Uses periodic boundary conditions when calculating relative coordinates
+    - Loads from all 27 mini boxes (target + 26 neighbors) to ensure complete
+      coverage within padding distance
+    - Memory usage scales with the number of particles in the 27 mini boxes
+    """
+    # Input validation
+    _validate_load_inputs(mini_box_id, boxsize, minisize, load_path, padding)
+
+    # Determine number of partitions per side
+    cells_per_side = int(numpy.ceil(boxsize / minisize))
+
+    # Calculate center coordinates. Grid cells start at (0,0,0) with size 
+    # minisize. Convert 1D ID to 3D grid coordinates (i, j, k). 
+    # Using the mapping: ID = k + j*cells_per_side + i*cells_per_side²
+    i = mini_box_id // (cells_per_side**2)
+    remainder = mini_box_id % (cells_per_side**2)
+    j = remainder // cells_per_side
+    k = remainder % cells_per_side
+    
+    center = numpy.array([
+        (k + 0.5) * minisize,
+        (j + 0.5) * minisize,
+        (i + 0.5) * minisize
+    ])
 
     # Get the adjacent mini box IDs
     mini_box_ids = get_adjacent_mini_box_ids(
@@ -603,15 +809,15 @@ def load_seeds(
     )
 
     # Create empty lists (containers) to save the data from file for each ID
-    pos, vel, hid, r200, m200, rs, mini_box_mask = ([] for _ in range(7))
+    positions, velocities, ids, r200, m200, rs, mini_box_mask = ([] for _ in range(7))
 
     # Load all adjacent boxes
     for i, mini_box in enumerate(mini_box_ids):
         file_name = f'mini_boxes_nside_{cells_per_side}/{mini_box}.hdf5'
         with h5py.File(load_path + file_name, 'r') as hdf:
-            pos.append(hdf['seed/pos'][()])
-            vel.append(hdf['seed/vel'][()])
-            hid.append(hdf['seed/ID'][()])
+            positions.append(hdf['seed/pos'][()])
+            velocities.append(hdf['seed/vel'][()])
+            ids.append(hdf['seed/ID'][()])
             r200.append(hdf['seed/R200b'][()])
             m200.append(hdf['seed/M200b'][()])
             rs.append(hdf['seed/Rs'][()])
@@ -621,10 +827,10 @@ def load_seeds(
             else:
                 mini_box_mask.append(numpy.zeros(n_seeds, dtype=bool))
 
-    # Concatenate into a single array
-    pos = numpy.concatenate(pos)
-    vel = numpy.concatenate(vel)
-    hid = numpy.concatenate(hid)
+    # Concatenate all loaded data into single arrays
+    positions = numpy.concatenate(positions)
+    velocities = numpy.concatenate(velocities)
+    ids = numpy.concatenate(ids)
     r200 = numpy.concatenate(r200)
     m200 = numpy.concatenate(m200)
     rs = numpy.concatenate(rs)
@@ -632,32 +838,41 @@ def load_seeds(
 
     # Mask seeds within a padding distance of the edge of the box in each
     # direction
-    loc_id = grid_ids == mini_box_id
+    # loc_id = grid_ids == mini_box_id
     padded_distance = 0.5 * minisize + padding
-    absolute_rel_pos = numpy.abs(relative_coordinates(
-        pos, grid_pos[loc_id], boxsize, periodic=True,
-    ))
+    absolute_rel_pos = numpy.abs(
+        relative_coordinates(positions, center, boxsize, periodic=True),
+    )
     mask = numpy.prod(absolute_rel_pos <= padded_distance, axis=1, dtype=bool)
 
+    # Apply mask
     m200 = m200[mask]
     r200 = r200[mask]
-    pos = pos[mask]
-    vel = vel[mask]
-    hid = hid[mask]
+    positions = positions[mask]
+    velocities = velocities[mask]
+    ids = ids[mask]
     rs = rs[mask]
     mini_box_mask = mini_box_mask[mask]
+
+    # Final validation
+    n_loaded = len(positions)
+    if n_loaded == 0:
+        raise RuntimeError(
+            f"No particles found within padding distance {padding} "
+            f"of mini box {mini_box_id}"
+        )
 
     # Sort seeds by M200 (largest first)
     argorder = numpy.argsort(-m200)
     m200 = m200[argorder]
     r200 = r200[argorder]
-    pos = pos[argorder]
-    vel = vel[argorder]
-    hid = hid[argorder]
+    positions = positions[argorder]
+    velocities = velocities[argorder]
+    ids = ids[argorder]
     rs = rs[argorder]
     mini_box_mask = mini_box_mask[argorder]
 
-    return (pos, vel, hid, r200, m200, rs, mini_box_mask)
+    return positions, velocities, ids, r200, m200, rs, mini_box_mask
 
 
 ###
