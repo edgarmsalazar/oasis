@@ -4,7 +4,7 @@ import h5py as h5
 import numpy as np
 from tqdm import tqdm
 
-from oasis.common import get_np_unit_dytpe, mkdir
+from oasis.common import get_np_unit_dtype, mkdir
 from oasis.coordinates import relative_coordinates
 
 
@@ -36,7 +36,7 @@ def generate_mini_box_grid(
     n_cells = boxes_per_side**3
     
     # Pre-allocate temporary arrays
-    uint_dtype = get_np_unit_dytpe(boxes_per_side**2)
+    uint_dtype = get_np_unit_dtype(boxes_per_side**2)
     centers_temp = np.zeros((n_cells, 3), dtype=np.float32)
     ids_temp = np.zeros(n_cells, dtype=uint_dtype)
     
@@ -225,7 +225,7 @@ def generate_mini_box_ids(
     # Determine data type for integer arrays based on the maximum number of
     # elements
     boxes_per_side = np.int_(np.ceil(boxsize / minisize))
-    uint_dtype = get_np_unit_dytpe(boxes_per_side**3)
+    uint_dtype = get_np_unit_dtype(boxes_per_side**3)
 
     ids = np.zeros(n_items, dtype=uint_dtype)
 
@@ -365,7 +365,7 @@ def split_box_into_mini_boxes(
     )
 
     # Get smallest data type to represent IDs
-    uint_dtype_pid = get_np_unit_dytpe(np.max(uid))
+    uint_dtype_pid = get_np_unit_dtype(np.max(uid))
     if props:
         labels = ('ID', 'pos', 'vel', *labels)
         dtypes = (uint_dtype_pid, np.float32, np.float32, *dtypes)

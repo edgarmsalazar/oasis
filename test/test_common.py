@@ -9,20 +9,20 @@ from oasis import common
 def test_get_np_unit_dytpe():
     # Check for input type
     with pytest.raises(TypeError):
-        common.get_np_unit_dytpe(-1)
+        common.get_np_unit_dtype(-1)
 
     with pytest.raises(TypeError):
-        common.get_np_unit_dytpe(1.0)
+        common.get_np_unit_dtype(1.0)
 
     # Check that the correct type is returned
-    assert common.get_np_unit_dytpe(65_534) == numpy.uint16
-    assert common.get_np_unit_dytpe(4_294_967_294) == numpy.uint32
-    assert common.get_np_unit_dytpe(4_294_967_295) == numpy.uint64
-    assert common.get_np_unit_dytpe(18_446_744_073_709_551_614) == numpy.uint64
+    assert common.get_np_unit_dtype(65_534) == numpy.uint16
+    assert common.get_np_unit_dtype(4_294_967_294) == numpy.uint32
+    assert common.get_np_unit_dtype(4_294_967_295) == numpy.uint64
+    assert common.get_np_unit_dtype(18_446_744_073_709_551_614) == numpy.uint64
 
     # Check that it overflows if the number is too large for unit64
     with pytest.raises(OverflowError):
-        common.get_np_unit_dytpe(18_446_744_073_709_551_615)
+        common.get_np_unit_dtype(18_446_744_073_709_551_615)
 
 
 def test_mkdir():

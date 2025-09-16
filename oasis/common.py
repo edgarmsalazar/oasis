@@ -82,7 +82,7 @@ def timer(
     return wrapper
 
 
-def get_np_unit_dytpe(num: Any) -> numpy.dtype:
+def get_np_unit_dtype(num: Any) -> numpy.dtype:
     """Determines the minimum unsigned integer type to represent `num`.
 
     Parameters
@@ -102,16 +102,13 @@ def get_np_unit_dytpe(num: Any) -> numpy.dtype:
     OverflowError
         If `num` cannot be represented by any 16, 32 or 64 bit unsigned integer.
     """
-    if num < 0 or type(num) in [float]:
-        raise TypeError
+    if not isinstance(num, int) or num < 0:
+        raise TypeError("Input must be a non-negative integer.")
 
-    np_unit_dtypes = numpy.array([numpy.uint16, numpy.uint32, numpy.uint64])
-    check: list[bool] = [num < numpy.iinfo(
-        item).max for item in np_unit_dtypes]
-    if any(check):
-        return np_unit_dtypes[numpy.argmax(check)]
-    else:
-        raise OverflowError
+    for dtype in [numpy.uint16, numpy.uint32, numpy.uint64]:
+        if num < numpy.iinfo(dtype).max:
+            return dtype
+    raise OverflowError("Number is too large for uint64.")
 
 
 def mkdir(path: str, verbose: bool = False) -> int:
