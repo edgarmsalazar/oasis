@@ -10,7 +10,7 @@ import numpy as np
 from oasis.calibration import calibrate
 from oasis.catalogue import run_orbiting_mass_assignment
 from oasis.common import ensure_dir_exists, timer
-from oasis.minibox import split_box_into_mini_boxes
+from oasis.minibox import split_simulation_into_mini_boxes
 
 # Simulation box parameters ====================================================
 # EXAMPLE values. Change them to your simulation parameters.
@@ -28,10 +28,6 @@ omega_m: float = 0.32                      #
 # ==============================================================================
 # OASIS will save results to this path
 save_path: str = '/'
-
-# Data preparation =============================================================
-chunksize_seed: int = 100_000
-chunksize_part: int = 10_000_000
 
 # Calibration ==================================================================
 n_seeds: int = 500
@@ -77,14 +73,13 @@ def process_seeds() -> None:
     props_zip = (props, labels, dtypes)
 
     # Save seeds into miniboxes according to their minibox ID.
-    split_box_into_mini_boxes(
+    split_simulation_into_mini_boxes(
         positions=pos,
         velocities=vel,
         uid=hid,
         save_path=save_path,
         boxsize=boxsize,
         minisize=minisize,
-        chunksize=chunksize_seed,
         name='seed',
         props=props_zip,
     )
@@ -97,14 +92,13 @@ def process_particles() -> None:
     pid, pos, vel = particle_data()
 
     # Save particles into miniboxes according to their minibox ID.
-    split_box_into_mini_boxes(
+    split_simulation_into_mini_boxes(
         positions=pos,
         velocities=vel,
         uid=pid,
         save_path=save_path,
         boxsize=boxsize,
         minisize=minisize,
-        chunksize=chunksize_part,
         name='part',
     )
 

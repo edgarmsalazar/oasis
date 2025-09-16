@@ -278,7 +278,7 @@ def get_adjacent_mini_box_ids(
     return adjacent_ids
 
 
-def split_box_into_mini_boxes(
+def split_simulation_into_mini_boxes(
     positions: numpy.ndarray,
     velocities: numpy.ndarray,
     uid: numpy.ndarray,
@@ -332,7 +332,7 @@ def split_box_into_mini_boxes(
 
     uint_dtype = get_min_unit_dtype(n_cells)
     mini_box_ids = numpy.zeros(n_items, dtype=uint_dtype)
-    for chunk in tqdm(range(n_cells), desc='Chunk', ncols=100, colour='blue'):
+    for chunk in tqdm(range(n_cells), desc='Getting IDs', ncols=100, colour='blue'):
         low = chunk * chunksize
         if chunk < n_cells - 2:
             upp = (chunk + 1) * chunksize
@@ -375,14 +375,17 @@ def split_box_into_mini_boxes(
     ensure_dir_exists(save_dir)
 
     # For each chunk
-    for chunk_i in tqdm(range(len(chunk_idx)-1),
-                        desc='Processing chunks',
-                        ncols=100, colour='blue'):
+    for i, mini_box_id in enumerate(tqdm(unique_values,
+                                  desc='Saving mini-boxes',
+                                  ncols=100, colour='blue')):
         # Select chunk
-        low = chunk_idx[chunk_i]
-        upp = chunk_idx[chunk_i + 1]
+        low = chunk_idx[i]
+        if i < n_cells - 1:
+            upp = chunk_idx[i + 1]
+        else:
+            upp = None
 
-        mb_chunk = mini_box_ids[low: upp]
+        # mb_chunk = mini_box_ids[low: upp]
         pos_chunk = positions[low: upp]
         vel_chunk = velocities[low: upp]
         pid_chunk = uid[low: upp]
@@ -392,46 +395,24 @@ def split_box_into_mini_boxes(
             for k, item in enumerate(props):
                 props_chunks[k] = item[low: upp]
 
-        # Check which mini box ids are in the chunk
-        mb_chunk_low = mb_chunk[0]
-        mb_chunk_upp = mb_chunk[-1] + 1
-
-        # Get index (search sorted style) of the first occurence of each
-        # distinct mini box id. Append a -1 at the end for completeness.
-        indexed_slice = []
-        for mb_id in range(mb_chunk_low, mb_chunk_upp):
-            indexed_slice.append(numpy.argmin(mb_chunk - mb_id))
-        indexed_slice.append(-1)
-
-        # Save data per slice
-        for i, mb_id in enumerate(range(mb_chunk_low, mb_chunk_upp)):
+        with h5py.File(save_dir + f'{mini_box_id}.hdf5', 'a') as hdf:
             if props:
-                data = (
-                    pid_chunk[indexed_slice[i]: indexed_slice[i+1]],
-                    pos_chunk[indexed_slice[i]: indexed_slice[i+1]],
-                    vel_chunk[indexed_slice[i]: indexed_slice[i+1]],
+                data = (pid_chunk, pos_chunk, vel_chunk,
                     *[
-                        item_chunk[indexed_slice[i]: indexed_slice[i+1]]
-                        for item_chunk in props_chunks
+                        item_chunk for item_chunk in props_chunks
                     ],
                 )
             else:
-                data = (
-                    pid_chunk[indexed_slice[i]: indexed_slice[i+1]],
-                    pos_chunk[indexed_slice[i]: indexed_slice[i+1]],
-                    vel_chunk[indexed_slice[i]: indexed_slice[i+1]],
-                )
+                data = (pid_chunk, pos_chunk, vel_chunk)
 
-            with h5py.File(save_dir + f'{mb_id}.hdf5', 'a') as hdf:
-                if (name is not None) and (not name in hdf.keys()):
-                    # hdf.create_group(name)
-                    prefix = f'{name}/'
-                else:
-                    prefix = ''
+            if (name is not None) and (not name in hdf.keys()):
+                prefix = f'{name}/'
+            else:
+                prefix = ''
 
-                for (label_i, data_i, dtype_i) in zip(labels, data, dtypes):
-                    hdf.create_dataset(name=prefix+f'{label_i}', data=data_i,
-                                       dtype=dtype_i)
+            for (label_i, data_i, dtype_i) in zip(labels, data, dtypes):
+                hdf.create_dataset(name=prefix+f'{label_i}', data=data_i,
+                                    dtype=dtype_i)
 
     return None
 
