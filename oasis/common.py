@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from functools import partial, wraps
 from pathlib import Path
 from time import perf_counter
-from typing import Any, Callable, Optional, Union
+from typing import Callable, Optional, Union
 
 import numpy
 
@@ -58,7 +58,7 @@ def timer(
     >>> @timer
     ... def slow_function():
     ...     time.sleep(1)
-    
+
     >>> @timer(fancy=False, precision=2)
     ... def another_function():
     ...     return 42
@@ -70,7 +70,7 @@ def timer(
     def wrapper(*args, **kwargs):
         if not enabled:
             return func(*args, **kwargs)
-            
+
         fmt = '%Y-%m-%d %H:%M:%S'
         start_time = datetime.now()
         perf_start = perf_counter()
@@ -81,7 +81,7 @@ def timer(
             finish_time = datetime.now()
             elapsed = perf_counter() - perf_start
             elapsed_str = f"{elapsed:.{precision}f}s"
-            
+
             if fancy:
                 print(
                     f"\t{AnsiColor.BOLD}Process:{AnsiColor.ENDC} "
@@ -107,29 +107,29 @@ def timer(
 class TimerContext:
     """
     Context manager for timing code blocks.
-    
+
     Examples
     --------
     >>> with TimerContext("data processing"):
     ...     # some time-consuming operation
     ...     time.sleep(1)
     """
-    
+
     def __init__(self, name: str = "operation", fancy: bool = True, precision: int = 3):
         self.name = name
         self.fancy = fancy
         self.precision = precision
         self.start_time = None
         self.elapsed = None
-    
+
     def __enter__(self):
         self.start_time = perf_counter()
         return self
-    
+
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.elapsed = perf_counter() - self.start_time
         elapsed_str = f"{self.elapsed:.{self.precision}f}s"
-        
+
         if self.fancy:
             print(
                 f"{AnsiColor.BULLET}{AnsiColor.BOLD}{AnsiColor.OKGREEN}"
@@ -138,7 +138,7 @@ class TimerContext:
             )
         else:
             print(f"{self.name} completed in {elapsed_str}")
-            
+
 
 def get_min_unit_dtype(num: int) -> numpy.dtype:
     """
@@ -175,13 +175,12 @@ def get_min_unit_dtype(num: int) -> numpy.dtype:
     for dtype in [numpy.uint8, numpy.uint16, numpy.uint32, numpy.uint64]:
         if num <= numpy.iinfo(dtype).max:
             return dtype
-            
+
     raise OverflowError(f"Number {num} exceeds maximum uint64 value")
 
 
-
 def ensure_dir_exists(
-    path: Union[str, Path], 
+    path: Union[str, Path],
     verbose: bool = False,
     parents: bool = True,
 ) -> Path:
@@ -215,21 +214,22 @@ def ensure_dir_exists(
     PosixPath('/absolute/path/to/data/output')
     """
     path_obj = Path(path).resolve()
-    
+
     if path_obj.exists():
         if not path_obj.is_dir():
             raise OSError(f"Path exists but is not a directory: {path_obj}")
         if verbose:
             print(f"Directory already exists: {path_obj}")
         return path_obj
-    
+
     try:
         path_obj.mkdir(parents=parents, exist_ok=True)
         if verbose:
             print(f"Created directory: {path_obj}")
         return path_obj
     except PermissionError as e:
-        raise PermissionError(f"Permission denied creating directory {path_obj}") from e
+        raise PermissionError(
+            f"Permission denied creating directory {path_obj}") from e
     except OSError as e:
         raise OSError(f"Failed to create directory {path_obj}: {e}") from e
 
