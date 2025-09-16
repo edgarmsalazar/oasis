@@ -18,6 +18,105 @@ def test_generate_mini_box_grid():
     assert len(ids) == numpy.int_(numpy.ceil(l_box / l_mb))**3
     # First position is shifted by l_mb/2
     assert all(centres[0] == numpy.full(3, 0.5*l_mb))
+    assert all(centres[100] == numpy.array([10., 10., 90.]))
+    assert all(centres[44] == numpy.array([90., 70., 30.]))
+
+    # Test when minisize is larger than boxsize
+    with pytest.raises(ValueError, match='Mini box size cannot be larger than box size.'):
+        minibox.generate_mini_box_grid(boxsize=1.0, minisize=5.0)
+
+    # Test very small minisize
+    ids, centres = minibox.generate_mini_box_grid(boxsize=1.0, minisize=0.1)
+    assert len(ids) == 10**3  # Should create 10x10x10 grid
+    
+    # Test when minisize equals boxsize
+    ids, centres = minibox.generate_mini_box_grid(boxsize=5.0, minisize=5.0)
+    assert len(ids) == 1
+    assert numpy.allclose(centres[0], [2.5, 2.5, 2.5])
+
+    # Test with multiple box/minibox size combinations
+    test_cases = [
+        (10.0, 1.0),   # Perfect division
+        (10.0, 3.0),   # Non-perfect division
+        (5.5, 2.0),    # Fractional box size
+        (1.0, 1.0),    # Single box
+    ]
+    
+    for boxsize, minisize in test_cases:
+        ids, centres = minibox.generate_mini_box_grid(boxsize=boxsize, minisize=minisize)
+        
+        # Calculate expected dimensions
+        boxes_per_side = numpy.int_(numpy.ceil(boxsize / minisize))
+        expected_count = boxes_per_side**3
+        
+        # Basic array properties
+        assert len(ids) == len(centres), f"Length mismatch for case ({boxsize}, {minisize})"
+        assert len(ids) == expected_count, f"Expected {expected_count} boxes, got {len(ids)}"
+        assert centres.shape == (expected_count, 3), f"Centres shape incorrect for case ({boxsize}, {minisize})"
+        
+        # ID properties
+        assert len(numpy.unique(ids)) == len(ids), "IDs are not unique"
+        assert numpy.all(ids >= 0), "All IDs should be non-negative"
+        assert numpy.max(ids) < boxes_per_side**3, "ID values exceed expected range"
+        
+        # Verify IDs are sorted (as per the function design)
+        assert numpy.array_equal(ids, numpy.sort(ids)), "IDs should be sorted"
+    
+    # Validate that centres form a proper regular grid.
+    
+    # First position should be at (0.5*minisize, 0.5*minisize, 0.5*minisize)
+    expected_first = numpy.full(3, 0.5 * minisize)
+    assert numpy.allclose(centres[0], expected_first), \
+        f"First centre should be {expected_first}, got {centres[0]}"
+    
+    # Check grid spacing
+    # Extract unique coordinates along each axis
+    x_coords = numpy.unique(centres[:, 0])
+    y_coords = numpy.unique(centres[:, 1])
+    z_coords = numpy.unique(centres[:, 2])
+    
+    # Verify we have the correct number of unique coordinates per axis
+    assert len(x_coords) == boxes_per_side, f"Expected {boxes_per_side} unique x-coords, got {len(x_coords)}"
+    assert len(y_coords) == boxes_per_side, f"Expected {boxes_per_side} unique y-coords, got {len(y_coords)}"
+    assert len(z_coords) == boxes_per_side, f"Expected {boxes_per_side} unique z-coords, got {len(z_coords)}"
+    
+    # Verify regular spacing
+    if boxes_per_side > 1:
+        x_spacing = numpy.diff(x_coords)
+        y_spacing = numpy.diff(y_coords)
+        z_spacing = numpy.diff(z_coords)
+        
+        assert numpy.allclose(x_spacing, minisize), "X-coordinates not regularly spaced"
+        assert numpy.allclose(y_spacing, minisize), "Y-coordinates not regularly spaced"
+        assert numpy.allclose(z_spacing, minisize), "Z-coordinates not regularly spaced"
+    
+    # Verify coordinate bounds
+    assert numpy.all(centres >= 0.5 * minisize), "Some centres are too close to origin"
+    max_expected = (boxes_per_side - 0.5) * minisize
+    assert numpy.all(centres <= max_expected), f"Some centres exceed expected bounds ({max_expected})"
+
+    # Validate that the ID-to-coordinate mapping is consistent
+    
+    # Reconstruct expected coordinates from IDs using the inverse mapping
+    # ID = k*1 + j*boxes_per_side + i*boxes_per_side^2
+    # where k, j, i are 0-indexed grid positions
+    
+    for idx, (id_val, centre) in enumerate(zip(ids, centres)):
+        # Decompose ID back to grid indices
+        i = id_val // (boxes_per_side**2)
+        remainder = id_val % (boxes_per_side**2)
+        j = remainder // boxes_per_side
+        k = remainder % boxes_per_side
+        
+        # Calculate expected centre from grid indices
+        expected_centre = numpy.array([
+            minisize * (k + 0.5),  # x
+            minisize * (j + 0.5),  # y  
+            minisize * (i + 0.5)   # z
+        ])
+        
+        assert numpy.allclose(centre, expected_centre), \
+            f"Centre mismatch at index {idx}: ID={id_val}, expected={expected_centre}, got={centre}"
 
 
 def test_get_mini_box_id():

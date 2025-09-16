@@ -5,8 +5,7 @@ import numpy as np
 from tqdm import tqdm
 
 from oasis.common import get_np_unit_dytpe, mkdir
-from oasis.coordinates import (cartesian_product, gen_data_pos_regular,
-                               relative_coordinates)
+from oasis.coordinates import relative_coordinates
 
 
 def generate_mini_box_grid(
@@ -27,27 +26,48 @@ def generate_mini_box_grid(
     Tuple[np.ndarray]
         ID and central coordinate for all mini boxes.
     """
-
+    if minisize > boxsize:
+        raise ValueError('Mini box size cannot be larger than box size.')
+    
     # Number of mini boxes per side
     boxes_per_side = np.int_(np.ceil(boxsize / minisize))
-
-    # Sub-box central coordinate. Populate each mini box with one point at the
-    # centre.
-    centres = gen_data_pos_regular(boxsize, minisize)
-
-    # Shift in each dimension for numbering mini boxes
+    
+    # Total number of cells
+    n_cells = boxes_per_side**3
+    
+    # Pre-allocate temporary arrays
     uint_dtype = get_np_unit_dytpe(boxes_per_side**2)
-    shift = np.array([1, boxes_per_side, boxes_per_side**2], dtype=uint_dtype)
-
-    # Set of all possible unique IDs for each mini box
-    n = np.arange(boxes_per_side, dtype=uint_dtype)
-    ids = np.sum(np.int_(cartesian_product([n, n, n])) * shift, axis=1)
-    sort_order = np.argsort(ids)
-
-    # Sort IDs so that the ID matches the row index.
-    ids = ids[sort_order]
-    centres = centres[sort_order]
-
+    centers_temp = np.zeros((n_cells, 3), dtype=np.float32)
+    ids_temp = np.zeros(n_cells, dtype=uint_dtype)
+    
+    # Pre-compute shift values to avoid repeated calculations
+    shift1 = np.array(1, dtype=uint_dtype)
+    shift2 = np.array(boxes_per_side, dtype=uint_dtype)  
+    shift3 = np.array(boxes_per_side**2, dtype=uint_dtype)
+    
+    # Generate centers and IDs in a single pass using nested loops
+    # This eliminates the need for cartesian_product and intermediate function calls
+    index = 0
+    for i in range(boxes_per_side):
+        for j in range(boxes_per_side):
+            for k in range(boxes_per_side):
+                # Generate cell centers directly (equivalent to gen_data_pos_regular)
+                centers_temp[index, 0] = minisize * (k + 0.5)  # x coordinate
+                centers_temp[index, 1] = minisize * (j + 0.5)  # y coordinate  
+                centers_temp[index, 2] = minisize * (i + 0.5)  # z coordinate
+                
+                # Generate unique IDs directly (equivalent to cartesian_product + shifts)
+                ids_temp[index] = k * shift1 + j * shift2 + i * shift3
+                
+                index += 1
+    
+    # Get the index array that would sort the IDs
+    sort_order = np.argsort(ids_temp)
+    
+    # Sort arrays using the index array (more cache-friendly approach)
+    ids = ids_temp[sort_order]
+    centres = centers_temp[sort_order]
+    
     return ids, centres
 
 
