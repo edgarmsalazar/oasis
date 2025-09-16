@@ -1,3 +1,9 @@
+import shutil
+import tempfile
+from pathlib import Path
+from typing import List, Optional, Tuple
+
+import h5py
 import numpy
 import pytest
 
@@ -6,7 +12,7 @@ from oasis import minibox
 
 class TestValidateInputsBoxsizeMinisize:
     """Test suite for _validate_inputs_boxsize_minisize function."""
-    
+
     def test_valid_inputs(self):
         """Test that valid inputs don't raise exceptions."""
         # Should not raise any exceptions
@@ -14,9 +20,9 @@ class TestValidateInputsBoxsizeMinisize:
         minibox._validate_inputs_boxsize_minisize(50, 25)
         minibox._validate_inputs_boxsize_minisize(1.0, 1.0)  # Equal values
         minibox._validate_inputs_boxsize_minisize(1000.5, 0.1)  # Float precision
-    
+
     @pytest.mark.parametrize(
-        "boxsize minisize, expected_error", 
+        "boxsize, minisize, expected_error",
         [
             # Type errors
             ("100", 10.0, TypeError),
@@ -34,9 +40,9 @@ class TestValidateInputsBoxsizeMinisize:
         """Test that invalid types raise TypeError."""
         with pytest.raises(expected_error, match="boxsize and minisize must be numeric"):
             minibox._validate_inputs_boxsize_minisize(boxsize, minisize)
-    
+
     @pytest.mark.parametrize(
-        "boxsize, minisize, expected_error, error_message", 
+        "boxsize, minisize, expected_error, error_message",
         [
             # Negative boxsize
             (-1.0, 10.0, ValueError, "boxsize must be positive"),
@@ -62,22 +68,22 @@ class TestValidateInputsBoxsizeMinisize:
         """Test that invalid values raise ValueError with correct messages."""
         with pytest.raises(expected_error, match=error_message):
             minibox._validate_inputs_boxsize_minisize(boxsize, minisize)
-    
+
     def test_edge_cases(self):
         """Test edge cases with very small or very large numbers."""
         # Very small positive numbers
         minibox._validate_inputs_boxsize_minisize(1e-10, 1e-11)
-        
+
         # Very large numbers
         minibox._validate_inputs_boxsize_minisize(1e10, 1e9)
-        
+
         # Float precision edge cases
         minibox._validate_inputs_boxsize_minisize(1.0000001, 1.0)
 
 
 class TestValidateInputsBoxPartitioning:
     """Test suite for _validate_inputs_box_partitioning function."""
-    
+
     @pytest.fixture
     def valid_data(self):
         """Fixture providing valid test data."""
@@ -86,7 +92,7 @@ class TestValidateInputsBoxPartitioning:
         velocities = numpy.random.rand(n_particles, 3)
         uid = numpy.arange(n_particles)
         return positions, velocities, uid, n_particles
-    
+
     @pytest.fixture
     def valid_props(self, valid_data):
         """Fixture providing valid props data."""
@@ -99,26 +105,29 @@ class TestValidateInputsBoxPartitioning:
         labels = ['property1', 'property2', 'property3']
         dtypes = [numpy.float32, numpy.float64, numpy.int32]
         return (arrays, labels, dtypes)
-    
+
     def test_valid_inputs_no_props(self, valid_data):
         """Test that valid inputs without props don't raise exceptions."""
         positions, velocities, uid, _ = valid_data
-        minibox._validate_inputs_box_partitioning(positions, velocities, uid, None)
-    
+        minibox._validate_inputs_box_partitioning(
+            positions, velocities, uid, None)
+
     def test_valid_inputs_with_props(self, valid_data, valid_props):
         """Test that valid inputs with props don't raise exceptions."""
         positions, velocities, uid, _ = valid_data
-        minibox._validate_inputs_box_partitioning(positions, velocities, uid, valid_props)
-    
+        minibox._validate_inputs_box_partitioning(
+            positions, velocities, uid, valid_props)
+
     def test_empty_arrays(self):
         """Test that empty but correctly shaped arrays are valid."""
         positions = numpy.empty((0, 3))
         velocities = numpy.empty((0, 3))
         uid = numpy.empty(0)
-        minibox._validate_inputs_box_partitioning(positions, velocities, uid, None)
-    
+        minibox._validate_inputs_box_partitioning(
+            positions, velocities, uid, None)
+
     @pytest.mark.parametrize(
-        "positions_shape, expected_error", 
+        "positions_shape, expected_error",
         [
             # Wrong number of dimensions
             ((100,), "positions must have shape \\(n_particles, 3\\)"),
@@ -134,12 +143,13 @@ class TestValidateInputsBoxPartitioning:
         positions = numpy.zeros(positions_shape)
         velocities = numpy.zeros((100, 3))
         uid = numpy.zeros(100)
-        
+
         with pytest.raises(ValueError, match=expected_error):
-            minibox._validate_inputs_box_partitioning(positions, velocities, uid, None)
-    
+            minibox._validate_inputs_box_partitioning(
+                positions, velocities, uid, None)
+
     @pytest.mark.parametrize(
-        "velocities_shape, expected_error", 
+        "velocities_shape, expected_error",
         [
             # Wrong number of dimensions
             ((100,), "velocities must have shape \\(n_particles, 3\\)"),
@@ -155,12 +165,13 @@ class TestValidateInputsBoxPartitioning:
         positions = numpy.zeros((100, 3))
         velocities = numpy.zeros(velocities_shape)
         uid = numpy.zeros(100)
-        
+
         with pytest.raises(ValueError, match=expected_error):
-            minibox._validate_inputs_box_partitioning(positions, velocities, uid, None)
-    
+            minibox._validate_inputs_box_partitioning(
+                positions, velocities, uid, None)
+
     @pytest.mark.parametrize(
-        "uid_shape, expected_error", 
+        "uid_shape, expected_error",
         [
             # Wrong number of dimensions
             ((100, 1), "uid must be a 1D array"),
@@ -173,12 +184,13 @@ class TestValidateInputsBoxPartitioning:
         positions = numpy.zeros((100, 3))
         velocities = numpy.zeros((100, 3))
         uid = numpy.zeros(uid_shape)
-        
+
         with pytest.raises(ValueError, match=expected_error):
-            minibox._validate_inputs_box_partitioning(positions, velocities, uid, None)
-    
+            minibox._validate_inputs_box_partitioning(
+                positions, velocities, uid, None)
+
     @pytest.mark.parametrize(
-        "pos_size, vel_size, uid_size", 
+        "pos_size, vel_size, uid_size",
         [
             (100, 50, 100),  # velocities mismatch
             (100, 100, 50),  # uid mismatch
@@ -192,16 +204,18 @@ class TestValidateInputsBoxPartitioning:
         positions = numpy.zeros((pos_size, 3))
         velocities = numpy.zeros((vel_size, 3))
         uid = numpy.zeros(uid_size)
-        
+
         with pytest.raises(ValueError, match="positions, velocities, and uid must have the same length"):
-            minibox._validate_inputs_box_partitioning(positions, velocities, uid, None)
-    
+            minibox._validate_inputs_box_partitioning(
+                positions, velocities, uid, None)
+
     @pytest.mark.parametrize(
-        "props_input, expected_error", 
+        "props_input, expected_error",
         [
             # Wrong type
             ("invalid", "props must be a tuple of \\(arrays, labels, dtypes\\)"),
-            (["list", "instead", "of", "tuple"], "props must be a tuple of \\(arrays, labels, dtypes\\)"),
+            (["list", "instead", "of", "tuple"],
+             "props must be a tuple of \\(arrays, labels, dtypes\\)"),
             (42, "props must be a tuple of \\(arrays, labels, dtypes\\)"),
             # Wrong tuple length
             ((), "props must be a tuple of \\(arrays, labels, dtypes\\)"),
@@ -212,12 +226,13 @@ class TestValidateInputsBoxPartitioning:
     def test_invalid_props_structure(self, valid_data, props_input, expected_error):
         """Test that invalid props structure raises ValueError."""
         positions, velocities, uid, _ = valid_data
-        
+
         with pytest.raises(ValueError, match=expected_error):
-            minibox._validate_inputs_box_partitioning(positions, velocities, uid, props_input)
-    
+            minibox._validate_inputs_box_partitioning(
+                positions, velocities, uid, props_input)
+
     @pytest.mark.parametrize(
-        "arrays, labels, dtypes, expected_error", 
+        "arrays, labels, dtypes, expected_error",
         [
             # Wrong types in props tuple
             ("not_list", [], [], "props must contain three lists"),
@@ -231,22 +246,24 @@ class TestValidateInputsBoxPartitioning:
         """Test that props with wrong list types raise ValueError."""
         positions, velocities, uid, _ = valid_data
         props = (arrays, labels, dtypes)
-        
+
         with pytest.raises(ValueError, match=expected_error):
-            minibox._validate_inputs_box_partitioning(positions, velocities, uid, props)
-    
+            minibox._validate_inputs_box_partitioning(
+                positions, velocities, uid, props)
+
     def test_mismatched_props_lengths(self, valid_data):
         """Test that props lists with different lengths raise ValueError."""
         positions, velocities, uid, _ = valid_data
-        
+
         arrays = [numpy.zeros(100)]
         labels = ['prop1', 'prop2']  # Different length
         dtypes = [numpy.float32]
         props = (arrays, labels, dtypes)
-        
+
         with pytest.raises(ValueError, match="All lists in props must have the same length"):
-            minibox._validate_inputs_box_partitioning(positions, velocities, uid, props)
-    
+            minibox._validate_inputs_box_partitioning(
+                positions, velocities, uid, props)
+
     @pytest.mark.parametrize(
         "array_type",
         [
@@ -259,35 +276,37 @@ class TestValidateInputsBoxPartitioning:
     def test_non_numpy_array_in_props(self, valid_data, array_type):
         """Test that non-numpy arrays in props raise ValueError."""
         positions, velocities, uid, n_particles = valid_data
-        
+
         arrays = [array_type]
         labels = ['prop1']
         dtypes = [numpy.float32]
         props = (arrays, labels, dtypes)
-        
+
         with pytest.raises(ValueError, match="props array 0 must be a numpy array"):
-            minibox._validate_inputs_box_partitioning(positions, velocities, uid, props)
-    
+            minibox._validate_inputs_box_partitioning(
+                positions, velocities, uid, props)
+
     @pytest.mark.parametrize(
-        "wrong_size", 
+        "wrong_size",
         [50, 150, 0, 1]
     )
     def test_wrong_size_props_array(self, valid_data, wrong_size):
         """Test that props arrays with wrong size raise ValueError."""
         positions, velocities, uid, n_particles = valid_data
-        
+
         arrays = [numpy.zeros(wrong_size)]
         labels = ['prop1']
         dtypes = [numpy.float32]
         props = (arrays, labels, dtypes)
-        
+
         with pytest.raises(ValueError, match=f"props array 0 must have {n_particles} elements"):
-            minibox._validate_inputs_box_partitioning(positions, velocities, uid, props)
-    
+            minibox._validate_inputs_box_partitioning(
+                positions, velocities, uid, props)
+
     def test_multiple_props_arrays_validation(self, valid_data):
         """Test validation of multiple props arrays with mixed validity."""
         positions, velocities, uid, n_particles = valid_data
-        
+
         # Second array has wrong size
         arrays = [
             numpy.zeros(n_particles),  # Correct
@@ -297,14 +316,15 @@ class TestValidateInputsBoxPartitioning:
         labels = ['prop1', 'prop2', 'prop3']
         dtypes = [numpy.float32, numpy.float64, numpy.int32]
         props = (arrays, labels, dtypes)
-        
+
         with pytest.raises(ValueError, match=f"props array 1 must have {n_particles} elements"):
-            minibox._validate_inputs_box_partitioning(positions, velocities, uid, props)
-    
+            minibox._validate_inputs_box_partitioning(
+                positions, velocities, uid, props)
+
     def test_props_with_different_array_shapes(self, valid_data):
         """Test that props arrays can have different shapes as long as first dimension matches."""
         positions, velocities, uid, n_particles = valid_data
-        
+
         arrays = [
             numpy.zeros(n_particles),          # 1D
             numpy.zeros((n_particles, 3)),     # 2D
@@ -313,67 +333,71 @@ class TestValidateInputsBoxPartitioning:
         labels = ['prop1', 'prop2', 'prop3']
         dtypes = [numpy.float32, numpy.float64, numpy.int32]
         props = (arrays, labels, dtypes)
-        
+
         # Should not raise an exception
-        minibox._validate_inputs_box_partitioning(positions, velocities, uid, props)
-    
+        minibox._validate_inputs_box_partitioning(
+            positions, velocities, uid, props)
+
     def test_tuples_instead_of_lists_in_props(self, valid_data):
         """Test that tuples are accepted instead of lists in props."""
         positions, velocities, uid, n_particles = valid_data
-        
+
         arrays = (numpy.zeros(n_particles),)  # tuple instead of list
         labels = ('prop1',)                # tuple instead of list
         dtypes = (numpy.float32,)            # tuple instead of list
         props = (arrays, labels, dtypes)
-        
+
         # Should not raise an exception
-        minibox._validate_inputs_box_partitioning(positions, velocities, uid, props)
+        minibox._validate_inputs_box_partitioning(
+            positions, velocities, uid, props)
 
 
 # Additional integration tests
 class TestValidationIntegration:
     """Integration tests for both validation functions together."""
-    
+
     @pytest.mark.parametrize("n_particles", [0, 1, 10, 1000])
     def test_various_particle_counts(self, n_particles):
         """Test both functions with various particle counts."""
         # Test boxsize/minisize validation
         minibox._validate_inputs_boxsize_minisize(100.0, 10.0)
-        
+
         # Test array validation
         positions = numpy.random.rand(n_particles, 3)
         velocities = numpy.random.rand(n_particles, 3)
         uid = numpy.arange(n_particles)
-        
-        minibox._validate_inputs_box_partitioning(positions, velocities, uid, None)
-    
+
+        minibox._validate_inputs_box_partitioning(
+            positions, velocities, uid, None)
+
     def test_realistic_simulation_data(self):
         """Test with realistic simulation-like data."""
         # Large simulation
         n_particles = 10000
         boxsize = 500.0
         minisize = 25.0
-        
+
         # Validate box parameters
         minibox._validate_inputs_boxsize_minisize(boxsize, minisize)
-        
+
         # Create realistic data
         positions = numpy.random.uniform(0, boxsize, size=(n_particles, 3))
         velocities = numpy.random.normal(0, 100, size=(n_particles, 3))
         uid = numpy.arange(n_particles, dtype=numpy.int64)
-        
+
         # Additional properties
         masses = numpy.random.lognormal(0, 1, size=n_particles)
         temperatures = numpy.random.exponential(1000, size=n_particles)
-        
+
         props = (
             [masses, temperatures],
             ['mass', 'temperature'],
             [numpy.float32, numpy.float32]
         )
-        
+
         # Should validate successfully
-        minibox._validate_inputs_box_partitioning(positions, velocities, uid, props)
+        minibox._validate_inputs_box_partitioning(
+            positions, velocities, uid, props)
 
 
 class TestGetMiniBoxId:
@@ -663,7 +687,7 @@ class TestGetAdjacentMiniBoxIds:
 
     # Test input validation
     @pytest.mark.parametrize(
-        "mini_box_id, expected_error", 
+        "mini_box_id, expected_error",
         [
             (3.14, TypeError),
             ("5", TypeError),
@@ -677,7 +701,7 @@ class TestGetAdjacentMiniBoxIds:
             minibox.get_adjacent_mini_box_ids(mini_box_id, 1.0, 1.0)
 
     @pytest.mark.parametrize(
-        "boxsize, minisize, expected_error", 
+        "boxsize, minisize, expected_error",
         [
             ("1.0", 1.0, TypeError),
             (1.0, "1.0", TypeError),
@@ -693,7 +717,7 @@ class TestGetAdjacentMiniBoxIds:
             minibox.get_adjacent_mini_box_ids(0, boxsize, minisize)
 
     @pytest.mark.parametrize(
-        "boxsize, minisize, expected_error", 
+        "boxsize, minisize, expected_error",
         [
             (0.0, 1.0, ValueError),
             (-1.0, 1.0, ValueError),
@@ -708,7 +732,7 @@ class TestGetAdjacentMiniBoxIds:
             minibox.get_adjacent_mini_box_ids(0, boxsize, minisize)
 
     @pytest.mark.parametrize(
-        "mini_box_id, boxsize, minisize", 
+        "mini_box_id, boxsize, minisize",
         [
             (-1, 2.0, 1.0),
             (-5, 2.0, 1.0),
@@ -756,7 +780,7 @@ class TestGetAdjacentMiniBoxIds:
         )
 
         adj_ids_0 = [0, 1, 4, 5, 6, 9, 20, 21, 24, 25, 26, 29, 30, 31, 34, 45,
-                      46, 49, 100, 101, 104, 105, 106, 109, 120, 121, 124]
+                     46, 49, 100, 101, 104, 105, 106, 109, 120, 121, 124]
 
         assert len(adj_ids) == 27
         assert all([i in adj_ids for i in adj_ids_0])
@@ -795,9 +819,9 @@ class TestGetAdjacentMiniBoxIds:
                 assert len(unique_ids) == 8, "Duplicate IDs found"
             else:
                 assert len(unique_ids) == 27, "Duplicate IDs found"
-            
 
     # Test specific grid configurations
+
     def test_1x1x1_grid(self):
         """Test edge case of 1x1x1 grid - all neighbors should be the same box."""
         result = minibox.get_adjacent_mini_box_ids(0, 1.0, 1.0)
@@ -848,7 +872,7 @@ class TestGetAdjacentMiniBoxIds:
         assert expected_neighbors.issubset(result_set)
 
     @pytest.mark.parametrize(
-        "mini_box_id, expected_coords", 
+        "mini_box_id, expected_coords",
         [
             (0, (0, 0, 0)),
             (1, (0, 0, 1)),
@@ -868,7 +892,7 @@ class TestGetAdjacentMiniBoxIds:
 
     # Test with different box/mini-box size ratios
     @pytest.mark.parametrize(
-        "boxsize, minisize, expected_cells", 
+        "boxsize, minisize, expected_cells",
         [
             (2.0, 1.0, 2),    # Exact division
             (2.1, 1.0, 3),    # Ceil rounds up
@@ -960,28 +984,518 @@ class TestGetAdjacentMiniBoxIds:
             assert result[0] == test_id
 
 
-# def test_split_into_mini_boxes():
-#     # Create sinthetic data
-#     l_box = 500.
-#     l_mb = 100.
-#     n_points = numpy.int_(numpy.ceil(l_box / l_mb))**3
-#     pos = coordinates.gen_data_pos_regular(l_box, l_mb)
-#     vel = numpy.random.uniform(-1, 1, n_points)
-#     # Offset PIDs to avoid confusion with mini box ID.
-#     pid = numpy.arange(2000, 2000 + n_points)
+class TestSplitSimulationIntoMiniBoxes:
+    """Test suite for split_simulation_into_mini_boxes function."""
+    
+    @pytest.fixture
+    def temp_dir(self):
+        """Create a temporary directory for test files."""
+        temp_dir = tempfile.mkdtemp()
+        yield temp_dir
+        # Cleanup
+        shutil.rmtree(temp_dir, ignore_errors=True)
+    
+    @pytest.fixture
+    def basic_simulation_data(self):
+        """Generate basic simulation data for testing."""
+        n_particles = 100
+        positions = numpy.random.rand(n_particles, 3) * 10.0
+        velocities = numpy.random.rand(n_particles, 3) * 5.0
+        uid = numpy.arange(n_particles, dtype=numpy.uint32)
+        return positions, velocities, uid
+    
+    @pytest.fixture
+    def large_simulation_data(self):
+        """Generate larger simulation data for performance testing."""
+        n_particles = 10000
+        positions = numpy.random.rand(n_particles, 3) * 100.0
+        velocities = numpy.random.randn(n_particles, 3) * 10.0
+        uid = numpy.arange(n_particles, dtype=numpy.uint64)
+        return positions, velocities, uid
+    
+    @pytest.fixture
+    def simulation_with_props(self):
+        """Generate simulation data with additional properties."""
+        n_particles = 200
+        positions = numpy.random.rand(n_particles, 3) * 20.0
+        velocities = numpy.random.rand(n_particles, 3) * 8.0
+        uid = numpy.arange(n_particles, dtype=numpy.uint32)
+        
+        # Additional properties
+        masses = numpy.random.exponential(1e10, n_particles).astype(numpy.float32)
+        temperatures = numpy.random.exponential(1e6, n_particles).astype(numpy.float32)
+        
+        props = (
+            [masses, temperatures],
+            ['mass', 'temperature'],
+            [numpy.float32, numpy.float32]
+        )
+        return positions, velocities, uid, props
+    
+    def verify_hdf5_structure(self, file_path: Path, expected_datasets: List[str], 
+                             name: Optional[str] = None):
+        """Verify HDF5 file structure and datasets."""
+        with h5py.File(file_path, 'r') as f:
+            prefix = f"{name}/" if name else ""
+            for dataset in expected_datasets:
+                dataset_path = f"{prefix}{dataset}"
+                assert dataset_path in f, f"Dataset {dataset_path} not found in {file_path}"
+                assert isinstance(f[dataset_path], h5py.Dataset), f"{dataset_path} is not a dataset"
+    
+    def verify_data_consistency(self, file_path: Path, original_positions: numpy.ndarray,
+                               original_velocities: numpy.ndarray, original_uid: numpy.ndarray,
+                               boxsize: float, minisize: float, mini_box_id: int,
+                               name: Optional[str] = None, props: Optional[Tuple] = None):
+        """Verify that saved data is consistent with original data."""
+        with h5py.File(file_path, 'r') as f:
+            prefix = f"{name}/" if name else ""
+            
+            # Load saved data
+            saved_positions = f[f"{prefix}pos"][:]
+            saved_velocities = f[f"{prefix}vel"][:]
+            saved_uid = f[f"{prefix}ID"][:]
+            
+            # Verify shapes
+            n_particles_in_box = saved_positions.shape[0]
+            assert saved_velocities.shape[0] == n_particles_in_box
+            assert saved_uid.shape[0] == n_particles_in_box
+            
+            # Verify all particles belong to this mini box
+            computed_ids = minibox.get_mini_box_id(saved_positions, boxsize, minisize)
+            if isinstance(computed_ids, numpy.ndarray):
+                assert numpy.all(computed_ids == mini_box_id), \
+                    f"Not all particles belong to mini box {mini_box_id}"
+            else:
+                assert computed_ids == mini_box_id, \
+                    f"Particle doesn't belong to mini box {mini_box_id}"
+            
+            # Verify data integrity by checking if saved UIDs exist in original data
+            original_uid_set = set(original_uid)
+            for saved_id in saved_uid:
+                assert saved_id in original_uid_set, \
+                    f"Saved UID {saved_id} not found in original data"
+            
+            # If props are provided, verify them too
+            if props:
+                arrays, labels, dtypes = props
+                for i, label in enumerate(labels):
+                    saved_prop = f[f"{prefix}{label}"][:]
+                    assert saved_prop.shape[0] == n_particles_in_box, \
+                        f"Property {label} has inconsistent number of particles"
+                    assert saved_prop.dtype == dtypes[i], \
+                        f"Property {label} has incorrect dtype"
+    
+    def test_basic_functionality(self, temp_dir, basic_simulation_data):
+        """Test basic functionality with simple data."""
+        positions, velocities, uid = basic_simulation_data
+        boxsize = 10.0
+        minisize = 2.0
+        
+        minibox.split_simulation_into_mini_boxes(
+            positions=positions,
+            velocities=velocities,
+            uid=uid,
+            save_path=temp_dir + "/",
+            boxsize=boxsize,
+            minisize=minisize
+        )
+        
+        # Verify directory structure
+        cells_per_side = int(numpy.ceil(boxsize / minisize))
+        output_dir = Path(temp_dir) / f"mini_boxes_nside_{cells_per_side}"
+        assert output_dir.exists(), "Output directory not created"
+        
+        # Verify files were created
+        hdf5_files = list(output_dir.glob("*.hdf5"))
+        assert len(hdf5_files) > 0, "No HDF5 files created"
+        
+        # Verify file structure
+        expected_datasets = ['ID', 'pos', 'vel']
+        for file_path in hdf5_files:
+            self.verify_hdf5_structure(file_path, expected_datasets)
+    
+    def test_with_name_parameter(self, temp_dir, basic_simulation_data):
+        """Test functionality with name parameter."""
+        positions, velocities, uid = basic_simulation_data
+        boxsize = 10.0
+        minisize = 2.0
+        name = "test_simulation"
+        
+        minibox.split_simulation_into_mini_boxes(
+            positions=positions,
+            velocities=velocities,
+            uid=uid,
+            save_path=temp_dir + "/",
+            boxsize=boxsize,
+            minisize=minisize,
+            name=name
+        )
+        
+        # Verify directory structure
+        cells_per_side = int(numpy.ceil(boxsize / minisize))
+        output_dir = Path(temp_dir) / f"mini_boxes_nside_{cells_per_side}"
+        
+        # Verify file structure with name prefix
+        expected_datasets = ['ID', 'pos', 'vel']
+        hdf5_files = list(output_dir.glob("*.hdf5"))
+        for file_path in hdf5_files:
+            self.verify_hdf5_structure(file_path, expected_datasets, name)
+    
+    def test_with_additional_properties(self, temp_dir, simulation_with_props):
+        """Test functionality with additional particle properties."""
+        positions, velocities, uid, props = simulation_with_props
+        boxsize = 20.0
+        minisize = 4.0
+        
+        minibox.split_simulation_into_mini_boxes(
+            positions=positions,
+            velocities=velocities,
+            uid=uid,
+            save_path=temp_dir + "/",
+            boxsize=boxsize,
+            minisize=minisize,
+            props=props
+        )
+        
+        # Verify directory structure
+        cells_per_side = int(numpy.ceil(boxsize / minisize))
+        output_dir = Path(temp_dir) / f"mini_boxes_nside_{cells_per_side}"
+        
+        # Verify file structure with additional properties
+        expected_datasets = ['ID', 'pos', 'vel', 'mass', 'temperature']
+        hdf5_files = list(output_dir.glob("*.hdf5"))
+        for file_path in hdf5_files:
+            self.verify_hdf5_structure(file_path, expected_datasets)
+    
+    @pytest.mark.parametrize("boxsize,minisize,expected_cells", [
+        (10.0, 2.0, 5),
+        (10.0, 3.0, 4),
+        (15.0, 5.0, 3),
+        (20.0, 7.0, 3),
+        (100.0, 25.0, 4)
+    ])
+    def test_different_box_configurations(self, temp_dir, basic_simulation_data,
+                                        boxsize, minisize, expected_cells):
+        """Test with different box size configurations."""
+        positions, velocities, uid = basic_simulation_data
+        # Scale positions to fit the box
+        positions = positions * (boxsize / 10.0)
+        
+        minibox.split_simulation_into_mini_boxes(
+            positions=positions,
+            velocities=velocities,
+            uid=uid,
+            save_path=temp_dir + "/",
+            boxsize=boxsize,
+            minisize=minisize
+        )
+        
+        # Verify correct number of cells
+        output_dir = Path(temp_dir) / f"mini_boxes_nside_{expected_cells}"
+        assert output_dir.exists(), f"Expected directory with {expected_cells} cells per side"
+    
+    def test_data_consistency(self, temp_dir, basic_simulation_data):
+        """Test that saved data is consistent with original data."""
+        positions, velocities, uid = basic_simulation_data
+        boxsize = 10.0
+        minisize = 2.0
+        
+        minibox.split_simulation_into_mini_boxes(
+            positions=positions,
+            velocities=velocities,
+            uid=uid,
+            save_path=temp_dir + "/",
+            boxsize=boxsize,
+            minisize=minisize
+        )
+        
+        # Verify data consistency
+        cells_per_side = int(numpy.ceil(boxsize / minisize))
+        output_dir = Path(temp_dir) / f"mini_boxes_nside_{cells_per_side}"
+        
+        hdf5_files = list(output_dir.glob("*.hdf5"))
+        for file_path in hdf5_files:
+            mini_box_id = int(file_path.stem)
+            self.verify_data_consistency(
+                file_path, positions, velocities, uid,
+                boxsize, minisize, mini_box_id
+            )
+    
+    def test_particle_count_conservation(self, temp_dir, basic_simulation_data):
+        """Test that all particles are saved and none are lost or duplicated."""
+        positions, velocities, uid = basic_simulation_data
+        boxsize = 10.0
+        minisize = 2.0
+        
+        minibox.split_simulation_into_mini_boxes(
+            positions=positions,
+            velocities=velocities,
+            uid=uid,
+            save_path=temp_dir + "/",
+            boxsize=boxsize,
+            minisize=minisize
+        )
+        
+        # Count total particles across all files
+        cells_per_side = int(numpy.ceil(boxsize / minisize))
+        output_dir = Path(temp_dir) / f"mini_boxes_nside_{cells_per_side}"
+        
+        total_saved_particles = 0
+        all_saved_uids = []
+        
+        hdf5_files = list(output_dir.glob("*.hdf5"))
+        for file_path in hdf5_files:
+            with h5py.File(file_path, 'r') as f:
+                n_particles = f['ID'].shape[0]
+                total_saved_particles += n_particles
+                all_saved_uids.extend(f['ID'][:])
+        
+        # Verify particle count
+        assert total_saved_particles == len(positions), \
+            f"Particle count mismatch: original {len(positions)}, saved {total_saved_particles}"
+        
+        # Verify no duplicates
+        assert len(set(all_saved_uids)) == len(all_saved_uids), \
+            "Duplicate particles found in saved files"
+        
+        # Verify all original UIDs are present
+        original_uid_set = set(uid)
+        saved_uid_set = set(all_saved_uids)
+        assert original_uid_set == saved_uid_set, \
+            "Saved UIDs don't match original UIDs"
+    
+    # def test_empty_mini_boxes_handling(self, temp_dir):
+    #     """Test behavior with sparse data leading to empty mini boxes."""
+    #     # Create data clustered in one corner
+    #     n_particles = 50
+    #     positions = numpy.random.rand(n_particles, 3) * 2.0  # Only in corner
+    #     velocities = numpy.random.rand(n_particles, 3) * 5.0
+    #     uid = numpy.arange(n_particles, dtype=numpy.uint32)
+        
+    #     boxsize = 20.0  # Much larger box
+    #     minisize = 2.0
+        
+    #     minibox.split_simulation_into_mini_boxes(
+    #         positions=positions,
+    #         velocities=velocities,
+    #         uid=uid,
+    #         save_path=temp_dir + "/",
+    #         boxsize=boxsize,
+    #         minisize=minisize
+    #     )
+        
+    #     # Verify only some files are created (not all mini boxes have particles)
+    #     cells_per_side = int(numpy.ceil(boxsize / minisize))
+    #     output_dir = Path(temp_dir) / f"mini_boxes_nside_{cells_per_side}"
+        
+    #     hdf5_files = list(output_dir.glob("*.hdf5"))
+    #     total_possible_boxes = cells_per_side ** 3
+        
+    #     # Should have fewer files than total possible boxes
+    #     assert len(hdf5_files) < total_possible_boxes, \
+    #         "Expected some empty mini boxes, but all were created"
+    #     assert len(hdf5_files) > 0, "No files created"
+    
+    def test_large_simulation(self, temp_dir, large_simulation_data):
+        """Test with larger simulation data."""
+        positions, velocities, uid = large_simulation_data
+        boxsize = 100.0
+        minisize = 10.0
+        
+        minibox.split_simulation_into_mini_boxes(
+            positions=positions,
+            velocities=velocities,
+            uid=uid,
+            save_path=temp_dir + "/",
+            boxsize=boxsize,
+            minisize=minisize
+        )
+        
+        # Verify particle conservation
+        cells_per_side = int(numpy.ceil(boxsize / minisize))
+        output_dir = Path(temp_dir) / f"mini_boxes_nside_{cells_per_side}"
+        
+        total_particles = 0
+        hdf5_files = list(output_dir.glob("*.hdf5"))
+        for file_path in hdf5_files:
+            with h5py.File(file_path, 'r') as f:
+                total_particles += f['ID'].shape[0]
+        
+        assert total_particles == len(positions), \
+            f"Particle count mismatch in large simulation: {total_particles} vs {len(positions)}"
+    
+    @pytest.mark.parametrize("invalid_positions", [
+        numpy.random.rand(100, 2),  # Wrong number of columns
+        numpy.random.rand(100),     # 1D array
+        numpy.random.rand(100, 3, 2),  # 3D array
+    ])
+    def test_invalid_positions_shape(self, temp_dir, invalid_positions):
+        """Test validation of positions array shape."""
+        velocities = numpy.random.rand(100, 3)
+        uid = numpy.arange(100)
+        
+        with pytest.raises(ValueError, match="positions must have shape"):
+            minibox.split_simulation_into_mini_boxes(
+                positions=invalid_positions,
+                velocities=velocities,
+                uid=uid,
+                save_path=temp_dir + "/",
+                boxsize=10.0,
+                minisize=2.0
+            )
+    
+    @pytest.mark.parametrize("invalid_velocities", [
+        numpy.random.rand(100, 2),  # Wrong number of columns
+        numpy.random.rand(100),     # 1D array
+        numpy.random.rand(50, 3),   # Wrong number of rows
+    ])
+    def test_invalid_velocities_shape(self, temp_dir, invalid_velocities):
+        """Test validation of velocities array shape."""
+        positions = numpy.random.rand(100, 3)
+        uid = numpy.arange(100)
+        
+        with pytest.raises(ValueError):
+            minibox.split_simulation_into_mini_boxes(
+                positions=positions,
+                velocities=invalid_velocities,
+                uid=uid,
+                save_path=temp_dir + "/",
+                boxsize=10.0,
+                minisize=2.0
+            )
+    
+    @pytest.mark.parametrize("invalid_uid", [
+        numpy.random.rand(100, 2),  # 2D array
+        numpy.arange(50),           # Wrong length
+    ])
+    def test_invalid_uid_shape(self, temp_dir, invalid_uid):
+        """Test validation of uid array shape."""
+        positions = numpy.random.rand(100, 3)
+        velocities = numpy.random.rand(100, 3)
+        
+        with pytest.raises(ValueError):
+            minibox.split_simulation_into_mini_boxes(
+                positions=positions,
+                velocities=velocities,
+                uid=invalid_uid,
+                save_path=temp_dir + "/",
+                boxsize=10.0,
+                minisize=2.0
+            )
+    
+    @pytest.mark.parametrize("boxsize,minisize,expected_error", [
+        (0, 2.0, "boxsize must be positive"),
+        (-5.0, 2.0, "boxsize must be positive"),
+        (10.0, 0, "minisize must be positive"),
+        (10.0, -2.0, "minisize must be positive"),
+        (5.0, 10.0, "minisize cannot be larger than boxsize"),
+        ("10.0", 2.0, "boxsize and minisize must be numeric"),
+        (10.0, "2.0", "boxsize and minisize must be numeric"),
+    ])
+    def test_invalid_box_parameters(self, temp_dir, basic_simulation_data,
+                                   boxsize, minisize, expected_error):
+        """Test validation of box size parameters."""
+        positions, velocities, uid = basic_simulation_data
+        
+        with pytest.raises((ValueError, TypeError), match=expected_error):
+            minibox.split_simulation_into_mini_boxes(
+                positions=positions,
+                velocities=velocities,
+                uid=uid,
+                save_path=temp_dir + "/",
+                boxsize=boxsize,
+                minisize=minisize
+            )
+    
+    def test_empty_arrays(self, temp_dir):
+        """Test behavior with empty input arrays."""
+        positions = numpy.empty((0, 3))
+        velocities = numpy.empty((0, 3))
+        uid = numpy.empty(0, dtype=int)
+        
+        with pytest.raises(ValueError, match="No particles provided"):
+            minibox.split_simulation_into_mini_boxes(
+                positions=positions,
+                velocities=velocities,
+                uid=uid,
+                save_path=temp_dir + "/",
+                boxsize=10.0,
+                minisize=2.0
+            )
+    
+    def test_invalid_props_structure(self, temp_dir, basic_simulation_data):
+        """Test validation of props parameter structure."""
+        positions, velocities, uid = basic_simulation_data
+        
+        # Test with wrong tuple length
+        invalid_props = ([numpy.random.rand(100)], ["mass"])  # Missing dtypes
+        
+        with pytest.raises(ValueError, match="props must be a tuple of"):
+            minibox.split_simulation_into_mini_boxes(
+                positions=positions,
+                velocities=velocities,
+                uid=uid,
+                save_path=temp_dir + "/",
+                boxsize=10.0,
+                minisize=2.0,
+                props=invalid_props
+            )
+    
+    def test_mismatched_props_arrays(self, temp_dir, basic_simulation_data):
+        """Test validation of props arrays with mismatched lengths."""
+        positions, velocities, uid = basic_simulation_data
+        
+        # Props array with wrong length
+        invalid_props = (
+            [numpy.random.rand(50)],  # Wrong length
+            ["mass"],
+            [numpy.float32]
+        )
+        
+        with pytest.raises(ValueError, match="must have.*elements"):
+            minibox.split_simulation_into_mini_boxes(
+                positions=positions,
+                velocities=velocities,
+                uid=uid,
+                save_path=temp_dir + "/",
+                boxsize=10.0,
+                minisize=2.0,
+                props=invalid_props
+            )
+    
+    def test_boundary_particles(self, temp_dir):
+        """Test handling of particles at box boundaries."""
+        # Create particles exactly at boundaries
+        positions = numpy.array([
+            [0.0, 0.0, 0.0],      # At origin
+            [10.0, 10.0, 10.0],   # At upper boundary
+            [5.0, 5.0, 5.0],      # In middle
+            [9.999999, 9.999999, 9.999999],  # Very close to boundary
+        ])
+        velocities = numpy.random.rand(4, 3)
+        uid = numpy.arange(4)
+        
+        boxsize = 10.0
+        minisize = 5.0
+        
+        minibox.split_simulation_into_mini_boxes(
+            positions=positions,
+            velocities=velocities,
+            uid=uid,
+            save_path=temp_dir + "/",
+            boxsize=boxsize,
+            minisize=minisize
+        )
+        
+        # Verify all particles are saved
+        cells_per_side = int(numpy.ceil(boxsize / minisize))
+        output_dir = Path(temp_dir) / f"mini_boxes_nside_{cells_per_side}"
+        
+        total_particles = 0
+        hdf5_files = list(output_dir.glob("*.hdf5"))
+        for file_path in hdf5_files:
+            with h5py.File(file_path, 'r') as f:
+                total_particles += f['ID'].shape[0]
+        
+        assert total_particles == 4, "Not all boundary particles were saved"
 
-#     temp_dir = os.getcwd() + '/temp/'
-#     # common.mkdir(temp_dir)
-#     # minibox.split_box_into_mini_boxes(pos, vel, pid, temp_dir, l_box, l_mb,
-#     #                                   chunksize=2*n_points)
-#     # os.removedirs(temp_dir)
-
-
-# def test_load_particles():
-#     ...
-
-
-# def test_load_seeds():
-#     ...
-
-###
