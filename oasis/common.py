@@ -167,7 +167,7 @@ def get_min_unit_dtype(num: int) -> numpy.dtype:
     >>> get_min_uint_dtype(70000)
     dtype('uint32')
     """
-    if not isinstance(num, int) or num < 0:
+    if not isinstance(num, (int, numpy.number)) or num < 0:
         raise TypeError("Input must be a non-negative integer")
 
     # Check in order of size
