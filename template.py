@@ -9,7 +9,7 @@ import numpy as np
 
 from oasis.calibration import calibrate
 from oasis.catalogue import run_orbiting_mass_assignment
-from oasis.common import mkdir, timer
+from oasis.common import ensure_dir_exists, timer
 from oasis.minibox import split_box_into_mini_boxes
 
 # Simulation box parameters ====================================================
@@ -177,7 +177,7 @@ def main():
 
 
 if __name__ == '__main__':
-    mkdir(save_path)
+    ensure_dir_exists(save_path)
     main()
 
 #####
