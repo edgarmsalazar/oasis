@@ -14,6 +14,7 @@ G_gravity: float = 4.3e-09     # Mpc (km/s)^2 / M_sun
 @dataclass(frozen=True)
 class AnsiColor:
     """
+    Provides ANSI escape codes for colored and styled terminal output.
     """
     HEADER: str = "\033[35m "
     OKBLUE: str = "\033[34m "
@@ -50,7 +51,7 @@ def timer(
         Returns callable object/return value.
     """
     if procedure is None:
-        return partial(timer, fancy=fancy, off=on)
+        return partial(timer, fancy=fancy, on=on)
 
     @wraps(procedure)
     def wrapper(*args, **kwargs):
@@ -62,7 +63,7 @@ def timer(
 
         finish = datetime.now()
         dt = timedelta(seconds=time()-t_start)
-        if not on:
+        if on:
             if fancy:
                 label = f"\t{AnsiColor.BOLD}Process:{AnsiColor.ENDC} " \
                     f"{AnsiColor.FAIL}{procedure.__name__}{AnsiColor.ENDC} \n" \
@@ -106,7 +107,7 @@ def get_np_unit_dtype(num: Any) -> numpy.dtype:
         raise TypeError("Input must be a non-negative integer.")
 
     for dtype in [numpy.uint16, numpy.uint32, numpy.uint64]:
-        if num < numpy.iinfo(dtype).max:
+        if num <= numpy.iinfo(dtype).max:
             return dtype
     raise OverflowError("Number is too large for uint64.")
 
