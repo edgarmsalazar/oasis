@@ -30,7 +30,7 @@ class AnsiColor:
 def timer(
     procedure: Callable = None, *,
     fancy: bool = True,
-    off: bool = False
+    on: bool = True,
 ) -> Callable:
     """
     Decorator that prints the procedure's execution time.
@@ -41,8 +41,8 @@ def timer(
         Any callable.
     fancy : bool, optional
         Prints timer message using colours, by default False.
-    off : bool, optional
-        Turns off the timer, by default False.
+    on : bool, optional
+        Turns on the timer, by default True.
 
     Returns
     -------
@@ -50,7 +50,7 @@ def timer(
         Returns callable object/return value.
     """
     if procedure is None:
-        return partial(timer, fancy=fancy, off=off)
+        return partial(timer, fancy=fancy, off=on)
 
     @wraps(procedure)
     def wrapper(*args, **kwargs):
@@ -62,19 +62,19 @@ def timer(
 
         finish = datetime.now()
         dt = timedelta(seconds=time()-t_start)
-        if fancy:
-            label = f"\t{AnsiColor.BOLD}Process:{AnsiColor.ENDC} " \
-                f"{AnsiColor.FAIL}{procedure.__name__}{AnsiColor.ENDC} \n" \
-                f"Start:  {AnsiColor.OKBLUE}{start.strftime(fmt)}{AnsiColor.ENDC} \n" \
-                f"Finish: {AnsiColor.OKBLUE}{finish.strftime(fmt)}{AnsiColor.ENDC} \n" \
-                f"{AnsiColor.BULLET}{AnsiColor.BOLD}{AnsiColor.OKGREEN} Elapsed time:{AnsiColor.ENDC} " \
-                f"{AnsiColor.WARNING}{dt}{AnsiColor.ENDC}"
-        else:
-            label = f"\t Process: {procedure.__name__} \n" \
-                f"Start:  {start.strftime(fmt)} \n" \
-                f"Finish: {finish.strftime(fmt)} \n" \
-                f"{AnsiColor.BULLET} Elapsed time: {dt}"
-        if not off:
+        if not on:
+            if fancy:
+                label = f"\t{AnsiColor.BOLD}Process:{AnsiColor.ENDC} " \
+                    f"{AnsiColor.FAIL}{procedure.__name__}{AnsiColor.ENDC} \n" \
+                    f"Start:  {AnsiColor.OKBLUE}{start.strftime(fmt)}{AnsiColor.ENDC} \n" \
+                    f"Finish: {AnsiColor.OKBLUE}{finish.strftime(fmt)}{AnsiColor.ENDC} \n" \
+                    f"{AnsiColor.BULLET}{AnsiColor.BOLD}{AnsiColor.OKGREEN} Elapsed time:{AnsiColor.ENDC} " \
+                    f"{AnsiColor.WARNING}{dt}{AnsiColor.ENDC}"
+            else:
+                label = f"\t Process: {procedure.__name__} \n" \
+                    f"Start:  {start.strftime(fmt)} \n" \
+                    f"Finish: {finish.strftime(fmt)} \n" \
+                    f"{AnsiColor.BULLET} Elapsed time: {dt}"
             print(label)
 
         return return_value
