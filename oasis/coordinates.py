@@ -1,76 +1,267 @@
-import numpy as np
+import numpy
 
 
 def relative_coordinates(
-    x: np.ndarray,
-    x0: np.ndarray,
-    boxsize: float,
+    positions: numpy.ndarray,
+    reference: numpy.ndarray,
+    box_size: float,
     periodic: bool = True
-) -> float:
-    """Returns the coordinates x relative to x0 accounting for periodic boundary
-    conditions.
+) -> numpy.ndarray:
+    """Compute positions relative to a reference point, with optional
+    periodic boundary conditions.
+
+    This function calculates the displacement vectors from a reference point
+    to a set of positions, optionally applying the minimum image convention
+    for periodic boundary conditions. This is commonly used in molecular
+    dynamics and cosmological simulations.
 
     Parameters
     ----------
-    x : np.ndarray
-        Position array (N, 3).
-    x0 : np.ndarray
-        Reference position in cartesian coordinates.
-    boxsize : float
-        Size of simulation box.
-    periodic : bool, optional
-        Set to True if the simulation box is periodic, by default True.
+    positions : numpy.ndarray
+        Array of positions with shape (N, 3) or (3,) for a single position.
+        If 1D array with shape (3,) is provided, it will be automatically
+        reshaped to (1, 3). Each row represents the (x, y, z) coordinates
+        of a particle.
+    reference : numpy.ndarray
+        Reference position with shape (3,) representing the (x, y, z)
+        coordinates of the reference point.
+    box_size : float
+        Size of the cubic simulation box. Must be a positive scalar.
+        All box dimensions are assumed to be equal.
+    periodic : bool, default=True
+        Whether to apply periodic boundary conditions using the minimum
+        image convention. If True, particles are mapped to their nearest
+        periodic images relative to the reference point.
 
     Returns
     -------
-    float
-        Relative positions.
+    numpy.ndarray
+        Relative positions with shape (N, 3). Each row contains the
+        displacement vector from the reference point to the corresponding
+        particle, accounting for periodic boundary conditions if enabled.
+
+    Raises
+    ------
+    ValueError
+        If `positions` does not have shape (N, 3) or (3,), `reference` does not
+        have shape (3,), or `box_size` is not a positive scalar.
+    TypeError
+        If inputs cannot be converted to appropriate numpy arrays.
+
+    Examples
+    --------
+    Multiple positions:
+    >>> positions = numpy.array([[0.1, 0.2, 0.3], [0.9, 0.8, 0.7]])
+    >>> reference = numpy.array([0.5, 0.5, 0.5])
+    >>> rel_pos = relative_coordinates(positions, reference, 1.0)
+    >>> print(rel_pos)
+    [[-0.4 -0.3 -0.2]
+     [ 0.4  0.3  0.2]]
+
+    Single position (1D input):
+    >>> single_pos = numpy.array([0.1, 0.2, 0.3])
+    >>> reference = numpy.array([0.5, 0.5, 0.5])
+    >>> rel_pos = relative_coordinates(single_pos, reference, 1.0)
+    >>> print(rel_pos)
+    [[-0.4 -0.3 -0.2]]
+
+    Without periodic boundary conditions:
+    >>> rel_pos_no_pbc = relative_coordinates(positions, reference, 1.0, periodic=False)
+    >>> print(rel_pos_no_pbc)
+    [[-0.4 -0.3 -0.2]
+     [ 0.4  0.3  0.2]]
+
+    Notes
+    -----
+    The minimum image convention ensures that the displacement vectors
+    have the smallest possible magnitude in a periodic system. For a
+    cubic box of size L, displacements are wrapped to the interval
+    [-L/2, L/2) in each dimension.
     """
-    if type(x) in [list, tuple]:
-        raise TypeError("Input 'x' must be an array (not a list or tuple)")
+    # Input validation and type conversion
+    try:
+        positions = numpy.asarray(positions, dtype=float)
+        reference = numpy.asarray(reference, dtype=float)
+    except (ValueError, TypeError) as e:
+        raise TypeError(f"Cannot convert inputs to numpy arrays: {e}")
+
+    # Ensure positions is 2D array with shape (N, 3)
+    if positions.ndim == 1:
+        positions = positions.reshape(1, 3)
+
+    # Shape validation
+    if positions.ndim != 2 or positions.shape[1] != 3:
+        raise ValueError(
+            f"`positions` must have shape (N, 3) or (3,), got {positions.shape}.")
+
+    if reference.shape != (3,):
+        raise ValueError(
+            f"`reference` must have shape (3,), got {reference.shape}.")
+
+    # Box size validation
+    if not numpy.isscalar(box_size):
+        raise ValueError("`box_size` must be a scalar value.")
+
+    if box_size <= 0:
+        raise ValueError(f"`box_size` must be positive, got {box_size}.")
+
+    # Compute displacement vectors
+    displacement = positions - reference
+
+    # Apply periodic boundary conditions using minimum image convention
     if periodic:
-        return (x - x0 + 0.5 * boxsize) % boxsize - 0.5 * boxsize
-    return x - x0
+        half_box = 0.5 * box_size
+        displacement = (displacement + half_box) % box_size - half_box
+
+    return displacement
 
 
 def velocity_components(
-    pos: np.ndarray,
-    vel: np.ndarray,
-) -> tuple[np.ndarray]:
-    """Computes the radial and tangential velocites from cartesian/rectangular 
-    coordinates.
+    positions: numpy.ndarray,
+    velocities: numpy.ndarray
+) -> tuple[numpy.ndarray, numpy.ndarray, numpy.ndarray]:
+    """Compute radial and tangential velocity components from Cartesian coordinates.
+
+    This function decomposes velocity vectors into radial (along the position
+    vector) and tangential (perpendicular to position vector) components.
+    This decomposition is commonly used in astrophysics, fluid dynamics,
+    and particle simulations to analyze motion patterns.
 
     Parameters
     ----------
-    pos : np.ndarray
-        Cartesian coordinates.
-    vel : np.ndarray
-        Cartesian velocities.
+    positions : numpy.ndarray
+        Array of Cartesian coordinates with shape (N, 3) or (3,) for a single
+        position. If 1D array with shape (3,) is provided, it will be automatically
+        reshaped to (1, 3). Each row represents the (x, y, z) coordinates of a particle.
+    velocities : numpy.ndarray
+        Array of Cartesian velocities with shape (N, 3) or (3,) for a single
+        velocity. If 1D array with shape (3,) is provided, it will be automatically
+        reshaped to (1, 3). Each row represents the (vx, vy, vz) velocity components
+        of a particle. Must have the same shape as `positions` after reshaping.
 
     Returns
     -------
-    tuple[np.ndarray]
-        Radial velocity, tangential velocity and magnitude squared of the 
-        velocity.
+    tuple[numpy.ndarray, numpy.ndarray, numpy.ndarray]
+        A tuple containing:
+        - radial_velocity : numpy.ndarray with shape (N,)
+            Component of velocity along the radial direction (positive = outward).
+        - tangential_velocity : numpy.ndarray with shape (N,)
+            Magnitude of velocity component perpendicular to the radial direction.
+        - velocity_squared : numpy.ndarray with shape (N,)
+            Total velocity magnitude squared (vx² + vy² + vz²).
+
+    Raises
+    ------
+    ValueError
+        If `positions` or `velocities` do not have shape (N, 3) or (3,),
+        or if arrays have incompatible shapes.
+    TypeError
+        If inputs cannot be converted to appropriate numpy arrays.
+
+    Examples
+    --------
+    Multiple particles:
+    >>> positions = numpy.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
+    >>> velocities = numpy.array([[0.5, 0.5, 0.0], [-0.5, 0.5, 0.0]])
+    >>> vr, vt, v2 = velocity_components(positions, velocities)
+    >>> print(f"Radial velocities: {vr}")
+    >>> print(f"Tangential velocities: {vt}")
+    Radial velocities: [0.5 -0.5]
+    Tangential velocities: [0.5  0.5]
+
+    Single particle (1D input):
+    >>> single_pos = numpy.array([1.0, 1.0, 0.0])
+    >>> single_vel = numpy.array([0.0, 1.0, 0.0])
+    >>> vr, vt, v2 = velocity_components(single_pos, single_vel)
+    >>> print(f"Radial velocity: {vr[0]:.3f}")
+    >>> print(f"Tangential velocity: {vt[0]:.3f}")
+    Radial velocity: 0.707
+    Tangential velocity: 0.707
+
+    With radial motion from origin:
+    >>> positions = numpy.array([[1.0, 0.0, 0.0], [0.0, 2.0, 0.0]])
+    >>> velocities = numpy.array([[0.5, 0.0, 0.0], [0.0, -1.0, 0.0]])
+    >>> vr, vt, v2 = velocity_components(positions, velocities)
+    >>> print(f"Radial velocities: {vr}")
+    >>> print(f"Tangential velocities: {vt}")
+    Radial velocities: [ 0.5 -1.0]
+    Tangential velocities: [0.0 0.0]
+
+    Notes
+    -----
+    The radial velocity is computed as v⃗ · r̂, where r̂ is the unit vector
+    pointing from the origin to the particle position. The tangential velocity
+    magnitude is computed as √(|v⃗|² - vᵣ²), ensuring numerical stability
+    by clamping negative values to zero.
+
+    For particles exactly at the origin (r = 0), the radial velocity is set
+    to zero and the tangential velocity equals the total velocity magnitude.
     """
-    if np.ndim(pos) < 2:
-        raise ValueError(f'Number of dimensions is {np.ndim(pos)}. Please ' +
-                         'reshape array to match 2D.')
+    # Input validation and type conversion
+    try:
+        positions = numpy.asarray(positions, dtype=float)
+        velocities = numpy.asarray(velocities, dtype=float)
+    except (ValueError, TypeError) as e:
+        raise TypeError(f"Cannot convert inputs to numpy arrays: {e}")
 
-    # Transform coordinates from cartesian to spherical
-    rps = np.sqrt(np.sum(np.square(pos), axis=1))
-    rp_hat = pos / rps
+    # Ensure positions and velocities are 2D arrays with shape (N, 3)
+    if positions.ndim == 1:
+        positions = positions.reshape(1, 3)
+    if velocities.ndim == 1:
+        velocities = velocities.reshape(1, 3)
 
-    # Compute radial velocity as v dot r_hat
-    vr = np.sum(vel * rp_hat, axis=1)
+    # Shape validation
+    if positions.ndim != 2 or positions.shape[1] != 3:
+        raise ValueError(
+            f"`positions` must have shape (N, 3) or (3,), got {positions.shape}.")
 
-    # Velocity squared
-    v2 = np.sum(np.square(vel), axis=1)
+    if velocities.ndim != 2 or velocities.shape[1] != 3:
+        raise ValueError(
+            f"`velocities` must have shape (N, 3) or (3,), got {velocities.shape}.")
 
-    # Compute perpendicular velocity component as v^2 - vr^2
-    vt = np.sqrt(v2 - np.square(vr))
+    if positions.shape != velocities.shape:
+        raise ValueError(f"`positions` and `velocities` must have the same shape, "
+                         f"got {positions.shape} and {velocities.shape}.")
 
-    return vr, vt, v2
+    # Compute radial distances from origin
+    radial_distances_squared = numpy.sum(positions**2, axis=1)
+    radial_distances = numpy.sqrt(radial_distances_squared)
+
+    # Initialize output arrays
+    num_particles = positions.shape[0]
+    radial_velocity = numpy.zeros(num_particles)
+    tangential_velocity = numpy.zeros(num_particles)
+    velocity_squared = numpy.sum(velocities**2, axis=1)
+
+    # For particles at the origin (r = 0), radial velocity is 0
+    # and tangential velocity equals total velocity magnitude
+    zero_mask = radial_distances == 0
+    if numpy.any(zero_mask):
+        tangential_velocity[zero_mask] = numpy.sqrt(
+            velocity_squared[zero_mask])
+    
+    # Handle particles not at the center (r > 0)
+    nonzero_mask = ~zero_mask
+    # if numpy.any(nonzero_mask):
+    # Compute unit radial vectors for non-zero positions
+    radial_unit_vectors = positions[nonzero_mask] / \
+        radial_distances[nonzero_mask, numpy.newaxis]
+
+    # Compute radial velocity as v⃗ · r̂
+    radial_velocity[nonzero_mask] = numpy.sum(
+        velocities[nonzero_mask] * radial_unit_vectors, axis=1
+    )
+
+    # Compute tangential velocity magnitude as √(v² - vᵣ²)
+    # Clamp to avoid numerical issues with floating point precision
+    radial_velocity_squared = radial_velocity[nonzero_mask]**2
+    tangential_velocity_squared = numpy.maximum(
+        0, velocity_squared[nonzero_mask] - radial_velocity_squared
+    )
+    tangential_velocity[nonzero_mask] = numpy.sqrt(
+        tangential_velocity_squared)
+
+    return radial_velocity, tangential_velocity, velocity_squared
 
 
 ###
