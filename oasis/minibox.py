@@ -65,7 +65,7 @@ def _validate_inputs_box_partitioning(positions, velocities, uid, props):
                     f"props array {i} must have {n_particles} elements")
 
 
-def _validate_load_inputs(
+def _validate_inputs_load(
     mini_box_id: int,
     boxsize: float,
     minisize: float,
@@ -632,7 +632,7 @@ def load_particles(
     split_simulation_into_mini_boxes : Create mini box files
     """
     # Input validation
-    _validate_load_inputs(mini_box_id, boxsize, minisize, load_path, padding)
+    _validate_inputs_load(mini_box_id, boxsize, minisize, load_path, padding)
 
     # Determine number of partitions per side
     cells_per_side = int(numpy.ceil(boxsize / minisize))
@@ -782,7 +782,7 @@ def load_seeds(
     - Memory usage scales with the number of particles in the 27 mini boxes
     """
     # Input validation
-    _validate_load_inputs(mini_box_id, boxsize, minisize, load_path, padding)
+    _validate_inputs_load(mini_box_id, boxsize, minisize, load_path, padding)
 
     # Determine number of partitions per side
     cells_per_side = int(numpy.ceil(boxsize / minisize))
