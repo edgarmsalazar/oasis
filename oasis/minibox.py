@@ -72,7 +72,7 @@ def generate_mini_box_grid(
 
 
 def get_mini_box_id(
-    x: np.ndarray,
+    position: np.ndarray,
     boxsize: float,
     minisize: float,
 ) -> int:
@@ -80,7 +80,7 @@ def get_mini_box_id(
 
     Parameters
     ----------
-    x : np.ndarray
+    position : np.ndarray
         Position in cartesian coordinates.
     boxsize : float
         Size of simulation box.
@@ -92,22 +92,35 @@ def get_mini_box_id(
     int
         ID of the mini box.
     """
-    # Number of mini boxes per side
-    boxes_per_side = np.int_(np.ceil(boxsize / minisize))
-    # Determine data type for integer arrays based on the maximum number of
-    # elements
-    uint_dtype = get_np_unit_dytpe(boxes_per_side**3)
-    # Shift in each dimension for numbering mini boxes
-    shift = np.array(
-        [1, boxes_per_side, boxes_per_side * boxes_per_side], dtype=uint_dtype)
-    # In the rare case an object is located exactly at the edge of the box,
-    # move it 'inwards' by a tiny amount so that the box id is correct.
-    x[np.where(x == boxsize)] -= 1e-8
-    x[np.where(x == 0)] += 1e-8
-    if x.ndim > 1:
-        return np.int_(np.sum(shift * np.floor(x / minisize), axis=1))
-    else:
-        return np.int_(np.sum(shift * np.floor(x / minisize)))
+    EDGE_TOL = 1e-8
+
+    if minisize > boxsize:
+        raise ValueError('Mini box size cannot be larger than box size.')
+    
+    # Ensure position is 2D array with shape (N, 3)
+    if position.ndim == 1:
+        position = position.reshape(1, 3)
+    
+    # Pre-compute shift values
+    n_cells_per_side = int(np.ceil(boxsize / minisize))
+    shift = np.array([1, n_cells_per_side, n_cells_per_side**2])
+    
+    # Handle edge cases using approximate equality
+    # Points at upper boundary
+    upper_mask = np.abs(position - boxsize) < 1e-9
+    position[upper_mask] -= EDGE_TOL
+    
+    # Points at lower boundary  
+    lower_mask = np.abs(position - 0.0) < 1e-9
+    position[lower_mask] += EDGE_TOL
+    
+    # Compute grid indices
+    grid_indices = np.floor(position / minisize).astype(int)
+    
+    # Compute unique IDs
+    ids = np.sum(shift * grid_indices, axis=1)
+
+    return ids
 
 
 def get_adjacent_mini_box_ids(

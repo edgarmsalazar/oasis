@@ -5,6 +5,7 @@ import pytest
 
 from oasis import coordinates, minibox, common
 
+
 l_box = 100.
 l_mb = 20.
 
@@ -126,15 +127,219 @@ def test_get_mini_box_id():
 
     # Partition box and retrive subbox ID for each particle. Only one particle
     # per subbox.
-    box_ids = minibox.get_mini_box_id(x=centres, boxsize=l_box, minisize=l_mb)
+    box_ids = minibox.get_mini_box_id(centres, boxsize=l_box, minisize=l_mb)
 
     assert box_ids[0] == 0  # First particle is in the first box with ID = 0
     # Last particle is in the last box with ID = 999
     assert box_ids[-1] == n_mb - 1
     assert len(numpy.unique(box_ids)) == n_mb  # One particle per subbox
 
-    box_ids = minibox.get_mini_box_id(x=centres[0], boxsize=l_box, minisize=l_mb)
+    box_ids = minibox.get_mini_box_id(centres[0], boxsize=l_box, minisize=l_mb)
     assert box_ids == 0
+
+class TestGetMiniBoxId:
+    """Test suite for minibox.get_mini_box_id function"""
+    
+    def test_single_position_origin(self):
+        """Test single position at origin"""
+        position = numpy.array([0.1, 0.1, 0.1])
+        boxsize = 10.0
+        minisize = 1.0
+        
+        result = minibox.get_mini_box_id(position, boxsize, minisize)
+        expected = numpy.array([0])  # Should be in first mini box (0,0,0)
+        
+        numpy.testing.assert_array_equal(result, expected)
+    
+    def test_single_position_interior(self):
+        """Test single position in interior"""
+        position = numpy.array([1.5, 2.5, 3.5])
+        boxsize = 10.0
+        minisize = 1.0
+        
+        result = minibox.get_mini_box_id(position, boxsize, minisize)
+        # Grid indices: (1, 2, 3), ID = 1*1 + 2*10 + 3*100 = 321
+        expected = numpy.array([321])
+        
+        numpy.testing.assert_array_equal(result, expected)
+    
+    def test_multiple_positions(self):
+        """Test multiple positions"""
+        positions = numpy.array([
+            [0.1, 0.1, 0.1],  # Grid (0,0,0) -> ID = 0
+            [1.5, 0.1, 0.1],  # Grid (1,0,0) -> ID = 1
+            [0.1, 1.5, 0.1],  # Grid (0,1,0) -> ID = 10
+            [0.1, 0.1, 1.5]   # Grid (0,0,1) -> ID = 100
+        ])
+        boxsize = 10.0
+        minisize = 1.0
+        
+        result = minibox.get_mini_box_id(positions, boxsize, minisize)
+        expected = numpy.array([0, 1, 10, 100])
+        
+        numpy.testing.assert_array_equal(result, expected)
+    
+    def test_edge_cases_upper_boundary(self):
+        """Test positions exactly at upper boundary"""
+        positions = numpy.array([
+            [10.0, 5.0, 5.0],  # Exactly at upper x boundary
+            [5.0, 10.0, 5.0],  # Exactly at upper y boundary
+            [5.0, 5.0, 10.0]   # Exactly at upper z boundary
+        ])
+        boxsize = 10.0
+        minisize = 1.0
+        
+        result = minibox.get_mini_box_id(positions, boxsize, minisize)
+        
+        # Should be moved inward and placed in grid (9,5,5), (5,9,5), (5,5,9)
+        expected = numpy.array([
+            9 + 5*10 + 5*100,   # 559
+            5 + 9*10 + 5*100,   # 595  
+            5 + 5*10 + 9*100    # 955
+        ])
+        
+        numpy.testing.assert_array_equal(result, expected)
+    
+    def test_edge_cases_lower_boundary(self):
+        """Test positions exactly at lower boundary (zero)"""
+        positions = numpy.array([
+            [0.0, 0.5, 0.5],  # Exactly at lower x boundary
+            [0.5, 0.0, 0.5],  # Exactly at lower y boundary
+            [0.5, 0.5, 0.0]   # Exactly at lower z boundary
+        ])
+        boxsize = 10.0
+        minisize = 1.0
+        
+        result = minibox.get_mini_box_id(positions, boxsize, minisize)
+        
+        # Should be moved inward and remain in grid (0,0,0)
+        expected = numpy.array([0, 0, 0])
+        
+        numpy.testing.assert_array_equal(result, expected)
+    
+    def test_non_unit_minisize(self):
+        """Test with non-unit mini box size"""
+        position = numpy.array([3.0, 6.0, 9.0])
+        boxsize = 12.0
+        minisize = 2.0
+        
+        result = minibox.get_mini_box_id(position, boxsize, minisize)
+        
+        # Grid indices: floor([3.0, 6.0, 9.0] / 2.0) = [1, 3, 4]
+        # n_cells_per_side = ceil(12.0 / 2.0) = 6
+        # ID = 1*1 + 3*6 + 4*36 = 1 + 18 + 144 = 163
+        expected = numpy.array([163])
+        
+        numpy.testing.assert_array_equal(result, expected)
+    
+    def test_fractional_minisize(self):
+        """Test with fractional mini box size"""
+        position = numpy.array([1.0, 1.0, 1.0])
+        boxsize = 3.0
+        minisize = 0.5
+        
+        result = minibox.get_mini_box_id(position, boxsize, minisize)
+        
+        # Grid indices: floor([1.0, 1.0, 1.0] / 0.5) = [2, 2, 2]
+        # n_cells_per_side = ceil(3.0 / 0.5) = 6
+        # ID = 2*1 + 2*6 + 2*36 = 2 + 12 + 72 = 86
+        expected = numpy.array([86])
+        
+        numpy.testing.assert_array_equal(result, expected)
+    
+    def test_input_validation_minisize_too_large(self):
+        """Test error when minisize > boxsize"""
+        position = numpy.array([1.0, 1.0, 1.0])
+        boxsize = 5.0
+        minisize = 10.0
+        
+        with pytest.raises(ValueError, match="Mini box size cannot be larger than box size"):
+            minibox.get_mini_box_id(position, boxsize, minisize)
+    
+    def test_output_shape_single_position(self):
+        """Test output shape for single position"""
+        position = numpy.array([1.0, 1.0, 1.0])
+        boxsize = 10.0
+        minisize = 1.0
+        
+        result = minibox.get_mini_box_id(position, boxsize, minisize)
+        
+        assert result.shape == (1,)
+        assert isinstance(result, numpy.ndarray)
+    
+    def test_output_shape_multiple_positions(self):
+        """Test output shape for multiple positions"""
+        positions = numpy.array([
+            [1.0, 1.0, 1.0],
+            [2.0, 2.0, 2.0],
+            [3.0, 3.0, 3.0]
+        ])
+        boxsize = 10.0
+        minisize = 1.0
+        
+        result = minibox.get_mini_box_id(positions, boxsize, minisize)
+        
+        assert result.shape == (3,)
+        assert isinstance(result, numpy.ndarray)
+    
+    def test_unique_ids_different_positions(self):
+        """Test that different positions get different IDs"""
+        positions = numpy.array([
+            [0.5, 0.5, 0.5],  # Grid (0,0,0)
+            [1.5, 0.5, 0.5],  # Grid (1,0,0)
+            [0.5, 1.5, 0.5],  # Grid (0,1,0)
+            [0.5, 0.5, 1.5]   # Grid (0,0,1)
+        ])
+        boxsize = 10.0
+        minisize = 1.0
+        
+        result = minibox.get_mini_box_id(positions, boxsize, minisize)
+        
+        # All IDs should be unique
+        assert len(numpy.unique(result)) == len(result)
+    
+    @pytest.mark.parametrize("boxsize,minisize", [
+        (1.0, 0.1),
+        (10.0, 1.0),
+        (5.5, 0.7),
+        (100.0, 3.3)
+    ])
+    def test_parametrized_box_sizes(self, boxsize, minisize):
+        """Test with various box and mini sizes"""
+        position = numpy.array([boxsize/2, boxsize/2, boxsize/2])
+        
+        result = minibox.get_mini_box_id(position, boxsize, minisize)
+        
+        # Should return a valid non-negative integer
+        assert result.dtype == int
+        assert result[0] >= 0
+        assert len(result) == 1
+    
+    def test_corner_cases_near_boundaries(self):
+        """Test positions very close to but not exactly at boundaries"""
+        positions = numpy.array([
+            [1e-10, 1.0, 1.0],      # Very close to zero
+            [10.0 - 1e-10, 1.0, 1.0]  # Very close to upper boundary
+        ])
+        boxsize = 10.0
+        minisize = 1.0
+        
+        result = minibox.get_mini_box_id(positions, boxsize, minisize)
+        
+        # Should handle these gracefully
+        assert len(result) == 2
+        assert all(id >= 0 for id in result)
+    
+    def test_empty_input_handling(self):
+        """Test behavior with empty input"""
+        positions = numpy.empty((0, 3))
+        boxsize = 10.0
+        minisize = 1.0
+        
+        result = minibox.get_mini_box_id(positions, boxsize, minisize)
+        
+        assert result.shape == (0,)
+        assert isinstance(result, numpy.ndarray)
 
 
 def test_get_adjacent_mini_box_ids():
