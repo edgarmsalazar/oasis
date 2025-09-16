@@ -1,4 +1,4 @@
-from typing import Tuple, Union
+from typing import List, Optional, Tuple, Union
 
 import h5py
 import numpy
@@ -6,6 +6,62 @@ from tqdm import tqdm
 
 from oasis.common import ensure_dir_exists, get_min_unit_dtype
 from oasis.coordinates import relative_coordinates
+
+
+def _validate_inputs_boxsize_minisize(boxsize, minisize):
+    """Validate function inputs and raise appropriate errors."""
+    if not isinstance(boxsize, (int, float)) or not isinstance(minisize, (int, float)):
+        raise TypeError("boxsize and minisize must be numeric")
+
+    # Check box parameters
+    if boxsize <= 0:
+        raise ValueError("boxsize must be positive")
+
+    if minisize <= 0:
+        raise ValueError("minisize must be positive")
+
+    if minisize > boxsize:
+        raise ValueError("minisize cannot be larger than boxsize")
+
+
+def _validate_inputs_box_partitioning(positions, velocities, uid, props):
+    """Validate function inputs and raise appropriate errors."""
+    # Check array shapes
+    if positions.ndim != 2 or positions.shape[1] != 3:
+        raise ValueError("positions must have shape (n_particles, 3)")
+
+    if velocities.ndim != 2 or velocities.shape[1] != 3:
+        raise ValueError("velocities must have shape (n_particles, 3)")
+
+    if uid.ndim != 1:
+        raise ValueError("uid must be a 1D array")
+
+    n_particles = positions.shape[0]
+    if velocities.shape[0] != n_particles or uid.shape[0] != n_particles:
+        raise ValueError(
+            "positions, velocities, and uid must have the same length")
+
+    # Validate props structure if provided
+    if props is not None:
+        if not isinstance(props, tuple) or len(props) != 3:
+            raise ValueError(
+                "props must be a tuple of (arrays, labels, dtypes)")
+
+        arrays, labels, dtypes = props
+        if not (isinstance(arrays, (list, tuple)) and
+                isinstance(labels, (list, tuple)) and
+                isinstance(dtypes, (list, tuple))):
+            raise ValueError("props must contain three lists")
+
+        if not (len(arrays) == len(labels) == len(dtypes)):
+            raise ValueError("All lists in props must have the same length")
+
+        for i, arr in enumerate(arrays):
+            if not isinstance(arr, numpy.ndarray):
+                raise ValueError(f"props array {i} must be a numpy array")
+            if arr.shape[0] != n_particles:
+                raise ValueError(
+                    f"props array {i} must have {n_particles} elements")
 
 
 def get_mini_box_id(
@@ -72,17 +128,7 @@ def get_mini_box_id(
     if not isinstance(position, numpy.ndarray):
         raise TypeError("position must be a numpy array")
 
-    if not isinstance(boxsize, (int, float)) or not isinstance(minisize, (int, float)):
-        raise TypeError("boxsize and minisize must be numeric")
-
-    if boxsize <= 0:
-        raise ValueError("boxsize must be positive")
-
-    if minisize <= 0:
-        raise ValueError("minisize must be positive")
-
-    if minisize > boxsize:
-        raise ValueError("minisize cannot be larger than boxsize")
+    _validate_inputs_boxsize_minisize(boxsize, minisize)
 
     # Handle input dimensions
     if position.ndim == 1:
@@ -204,17 +250,7 @@ def get_adjacent_mini_box_ids(
     if not isinstance(mini_box_id, (int, numpy.integer)):
         raise TypeError("mini_box_id must be an integer")
 
-    if not isinstance(boxsize, (int, float)) or not isinstance(minisize, (int, float)):
-        raise TypeError("boxsize and minisize must be numeric")
-
-    if boxsize <= 0:
-        raise ValueError("boxsize must be positive")
-
-    if minisize <= 0:
-        raise ValueError("minisize must be positive")
-
-    if minisize > boxsize:
-        raise ValueError("minisize cannot be larger than boxsize")
+    _validate_inputs_boxsize_minisize(boxsize, minisize)
 
     # Convert to Python int to avoid numpy scalar issues
     mini_box_id = int(mini_box_id)
@@ -285,30 +321,45 @@ def split_simulation_into_mini_boxes(
     save_path: str,
     boxsize: float,
     minisize: float,
-    name: str = None,
-    props: Tuple[list, list, list] = None
+    name: Optional[str] = None,
+    props: Optional[Tuple[List[numpy.ndarray],
+                          List[str], List[numpy.dtype]]] = None
 ) -> None:
-    """Sorts all items into mini boxes and saves them in disc.
+    """
+    Split simulation data into mini boxes and save to HDF5 files.
+
+    This function partitions simulation data (positions, velocities, IDs) into 
+    smaller spatial boxes for efficient processing and storage. Each mini box
+    is saved as a separate HDF5 file containing all particles within that region.
 
     Parameters
     ----------
     positions : numpy.ndarray
-        Cartesian coordinates
+        Particle positions with shape (n_particles, 3) containing Cartesian 
+        coordinates.
     velocities : numpy.ndarray
-        Cartesian velocities
+        Particle velocities with shape (n_particles, 3) containing Cartesian
+        velocity components.
     uid : numpy.ndarray
-        Unique IDs for each position (e.g. PID, HID)
+        Unique identifiers for each particle with shape (n_particles,).
+        Examples include particle IDs (PID) or halo IDs (HID).
     save_path : str
-        Where to save the IDs
+        Base directory path where mini box files will be saved. A subdirectory
+        will be created automatically.
     boxsize : float
-        Size of simulation box
+        Size of the full simulation box in simulation units.
     minisize : float
-        Size of mini box
+        Target size of each mini box in simulation units. Must be > 0 and
+        should be smaller than boxsize for meaningful partitioning.
     name : str, optional
-        An additional name or identifier appended at the end of the file name, 
-        by default None
-    props : tuple[list(array), list(str), list(dtype)], optional
-        Additional arrays to be sorted into mini boxes.
+        Additional identifier to create a group within each HDF5 file.
+        If None, datasets are stored at the root level. Default is None.
+    props : tuple of (list, list, list), optional
+        Additional particle properties to include. Must contain exactly 3 lists:
+        - List of numpy arrays with additional particle data
+        - List of string labels for each array
+        - List of numpy dtypes for each array
+        All arrays must have shape (n_particles, ...). Default is None.
 
     Returns
     -------
@@ -316,30 +367,61 @@ def split_simulation_into_mini_boxes(
 
     Raises
     ------
+    ValueError
+        If input arrays have incompatible shapes, if boxsize or minisize are
+        invalid, or if props tuple has incorrect structure.
+    OSError
+        If save_path cannot be created or accessed.
     RuntimeError
-        If `chunksize` is too small, the chunk-finding loop cannot properly 
-        resolve all the mini box ids within a chunk.
+        If chunking parameters result in processing errors.
+
+    Notes
+    -----
+    - The function creates a subdirectory named 'mini_boxes_nside_{n}/' where
+      n is the number of cells per side
+    - Each mini box is saved as '{mini_box_id}.hdf5'
+    - Memory usage is optimized by processing particles in chunks
+    - Progress bars show completion status for ID computation and file saving
+
+    Examples
+    --------
+    >>> positions = numpy.random.rand(1000, 3) * 100.0
+    >>> velocities = numpy.random.rand(1000, 3) * 10.0
+    >>> particle_ids = numpy.arange(1000)
+    >>> split_simulation_into_mini_boxes(
+    ...     positions, velocities, particle_ids,
+    ...     save_path="/data/output/",
+    ...     boxsize=100.0, minisize=10.0
+    ... )
     """
+    # Input validation
+    _validate_inputs_boxsize_minisize(boxsize, minisize)
+    _validate_inputs_box_partitioning(positions, velocities, uid, props)
+
     # Determine number of partitions per side
     cells_per_side = int(numpy.ceil(boxsize / minisize))
     n_cells = cells_per_side**3
+    n_items = positions.shape[0]
+
+    if n_items == 0:
+        raise ValueError("No particles provided (empty arrays)")
 
     # Compute mini box IDs for all items in chunks with size of the average number
     # of items per mini box to imporve computation speed and reduce memory usage.
     # This is important for large simulations with billions of particles.
-    n_items = positions.shape[0]
-    chunksize = n_items // n_cells
-
+    chunksize = max(1, n_items // n_cells)  # Ensure chunksize >= 1
     uint_dtype = get_min_unit_dtype(n_cells)
     mini_box_ids = numpy.zeros(n_items, dtype=uint_dtype)
-    for chunk in tqdm(range(n_cells), desc='Getting IDs', ncols=100, colour='blue'):
+
+    n_chunks = (n_items + chunksize - 1) // chunksize  # Ceiling division
+    for chunk in tqdm(range(n_chunks), desc='Computing IDs', ncols=100, colour='blue'):
         low = chunk * chunksize
-        if chunk < n_cells - 2:
-            upp = (chunk + 1) * chunksize
-        else:
-            upp = None
+        # Ensure we don't exceed array bounds
+        upp = min((chunk + 1) * chunksize, n_items)
+
         mini_box_ids[low:upp] = get_mini_box_id(
-            positions[low:upp], boxsize, minisize)
+            positions[low:upp], boxsize, minisize
+        )
 
     # Sort data by mini box id
     mb_order = numpy.argsort(mini_box_ids)
@@ -374,10 +456,11 @@ def split_simulation_into_mini_boxes(
     save_dir = save_path + f'mini_boxes_nside_{cells_per_side}/'
     ensure_dir_exists(save_dir)
 
-    # For each chunk
+    # For each mini box, save all items in that box to a separate HDF5 file.
+    # Use 'a' mode to append data if file already exists.
     for i, mini_box_id in enumerate(tqdm(unique_values,
-                                  desc='Saving mini-boxes',
-                                  ncols=100, colour='blue')):
+                                         desc='Saving mini-boxes',
+                                         ncols=100, colour='blue')):
         # Select chunk
         low = chunk_idx[i]
         if i < n_cells - 1:
@@ -385,34 +468,24 @@ def split_simulation_into_mini_boxes(
         else:
             upp = None
 
-        # mb_chunk = mini_box_ids[low: upp]
         pos_chunk = positions[low: upp]
         vel_chunk = velocities[low: upp]
         pid_chunk = uid[low: upp]
 
-        if props:
-            props_chunks = [None for _ in range(len(props))]
-            for k, item in enumerate(props):
-                props_chunks[k] = item[low: upp]
-
+        
         with h5py.File(save_dir + f'{mini_box_id}.hdf5', 'a') as hdf:
             if props:
-                data = (pid_chunk, pos_chunk, vel_chunk,
-                    *[
-                        item_chunk for item_chunk in props_chunks
-                    ],
-                )
+                props_chunks = [item[low: upp] for item in props]
+                data = (pid_chunk, pos_chunk, vel_chunk, *props_chunks)
             else:
                 data = (pid_chunk, pos_chunk, vel_chunk)
 
-            if (name is not None) and (not name in hdf.keys()):
-                prefix = f'{name}/'
-            else:
-                prefix = ''
+            prefix = f'{name}/' if name is not None and name not in hdf.keys() else ''
 
-            for (label_i, data_i, dtype_i) in zip(labels, data, dtypes):
-                hdf.create_dataset(name=prefix+f'{label_i}', data=data_i,
-                                    dtype=dtype_i)
+            for label_i, data_i, dtype_i in zip(labels, data, dtypes):
+                dataset_name = prefix + f'{label_i}'
+                hdf.create_dataset(name=dataset_name,
+                                   data=data_i, dtype=dtype_i)
 
     return None
 
