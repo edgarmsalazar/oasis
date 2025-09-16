@@ -151,15 +151,44 @@ def get_adjacent_mini_box_ids(
     ValueError
         If `id` is not found in the allowed values in `ids`
     """
-    mini_box_ids, centres = generate_mini_box_grid(boxsize, minisize)
-    if mini_box_id not in mini_box_ids:
-        raise ValueError(f'ID {mini_box_id} is out of bounds')
+    if minisize > boxsize:
+        raise ValueError('Mini box size cannot be larger than box size.')
+    
+    # Number of mini boxes per side
+    boxes_per_side = int(np.ceil(boxsize / minisize))
+    max_id = boxes_per_side**3 - 1
+    
+    if mini_box_id < 0 or mini_box_id > max_id:
+        raise ValueError(f'ID {mini_box_id} is out of bounds (valid range: 0-{max_id})')
+    
+    # Convert 1D ID to 3D coordinates (i, j, k)
+    # ID = k + j*boxes_per_side + i*boxes_per_side^2
+    i = mini_box_id // (boxes_per_side**2)
+    remainder = mini_box_id % (boxes_per_side**2)
+    j = remainder // boxes_per_side
+    k = remainder % boxes_per_side
+    
+    # Start with the input ID as the first element
+    adjacent_ids = [mini_box_id]
 
-    x0 = centres[mini_box_ids == mini_box_id]
-    radius = relative_coordinates(centres, x0, boxsize)
-    radius = np.sqrt(np.sum(np.square(radius), axis=1))
-    mask = radius <= 1.01 * np.sqrt(3.) * minisize
-    return mini_box_ids[mask]
+    # Generate all 27 adjacent box coordinates (3x3x3 neighborhood)
+    for di in [-1, 0, 1]:
+        for dj in [-1, 0, 1]:
+            for dk in [-1, 0, 1]:
+                # Skip the center box (0,0,0) since we already added it
+                if di == 0 and dj == 0 and dk == 0:
+                    continue
+
+                # Apply periodic boundary conditions
+                ni = (i + di) % boxes_per_side
+                nj = (j + dj) % boxes_per_side  
+                nk = (k + dk) % boxes_per_side
+                
+                # Convert back to 1D ID
+                neighbor_id = nk + nj * boxes_per_side + ni * (boxes_per_side**2)
+                adjacent_ids.append(neighbor_id)
+    
+    return np.array(adjacent_ids, dtype=np.int32)
 
 
 def generate_mini_box_ids(
