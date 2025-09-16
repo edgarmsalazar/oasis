@@ -858,7 +858,7 @@ def load_seeds(
     n_loaded = len(positions)
     if n_loaded == 0:
         raise RuntimeError(
-            f"No particles found within padding distance {padding} "
+            f"No seeds found within padding distance {padding} "
             f"of mini box {mini_box_id}"
         )
 

@@ -19,7 +19,8 @@ class TestValidateInputsBoxsizeMinisize:
         minibox._validate_inputs_boxsize_minisize(100.0, 10.0)
         minibox._validate_inputs_boxsize_minisize(50, 25)
         minibox._validate_inputs_boxsize_minisize(1.0, 1.0)  # Equal values
-        minibox._validate_inputs_boxsize_minisize(1000.5, 0.1)  # Float precision
+        minibox._validate_inputs_boxsize_minisize(
+            1000.5, 0.1)  # Float precision
 
     @pytest.mark.parametrize(
         "boxsize, minisize, expected_error",
@@ -352,7 +353,120 @@ class TestValidateInputsBoxPartitioning:
             positions, velocities, uid, props)
 
 
+class TestValidateInputsLoad:
+    """Test suite for _validate_inputs_load function."""
+
+    def test_valid_inputs(self, tmp_path):
+        """Test that valid inputs don't raise exceptions."""
+        valid_dir = tmp_path / "data"
+        valid_dir.mkdir()
+
+        # Should not raise any exceptions
+        minibox._validate_inputs_load(
+            mini_box_id=0,
+            boxsize=100.0,
+            minisize=10.0,
+            load_path=valid_dir,
+            padding=0.0,
+        )
+
+        minibox._validate_inputs_load(
+            mini_box_id=5,
+            boxsize=10.0,
+            minisize=1.0,
+            load_path=str(valid_dir),
+            padding=1.0,
+        )
+
+    @pytest.mark.parametrize(
+        "mini_box_id, boxsize, minisize, load_path, padding, expected_error, error_message",
+        [
+            # mini_box_id type errors
+            ("0", 100.0, 10.0, "some/path", 0.0,
+             TypeError, "mini_box_id must be an integer"),
+            (None, 100.0, 10.0, "some/path", 0.0,
+             TypeError, "mini_box_id must be an integer"),
+            (1.5, 100.0, 10.0, "some/path", 0.0,
+             TypeError, "mini_box_id must be an integer"),
+            # padding type errors
+            (0, 100.0, 10.0, "some/path", "0.0",
+             TypeError, "padding must be numeric"),
+            (0, 100.0, 10.0, "some/path", None,
+             TypeError, "padding must be numeric"),
+            # load_path type errors
+            (0, 100.0, 10.0, 123, 0.0, TypeError,
+             "load_path must be a string or Path object"),
+            (0, 100.0, 10.0, None, 0.0, TypeError,
+             "load_path must be a string or Path object"),
+        ],
+    )
+    def test_type_errors(
+        self, mini_box_id, boxsize, minisize, load_path, padding, expected_error, error_message
+    ):
+        """Test that invalid types raise TypeError with correct messages."""
+        with pytest.raises(expected_error, match=error_message):
+            minibox._validate_inputs_load(
+                mini_box_id, boxsize, minisize, load_path, padding)
+
+    @pytest.mark.parametrize(
+        "mini_box_id, boxsize, minisize, padding, expected_error, error_message",
+        [
+            # Negative mini_box_id
+            (-1, 10.0, 1.0, 0.0, ValueError, "mini_box_id must be non-negative"),
+            # mini_box_id too large
+            (1000, 10.0, 1.0, 0.0, ValueError, "exceeds maximum valid ID"),
+            # Negative padding
+            (0, 10.0, 1.0, -0.5, ValueError, "padding must be non-negative"),
+        ],
+    )
+    def test_value_errors(
+        self, tmp_path, mini_box_id, boxsize, minisize, padding, expected_error, error_message
+    ):
+        """Test that invalid values raise ValueError with correct messages."""
+        valid_dir = tmp_path / "data"
+        valid_dir.mkdir()
+
+        with pytest.raises(expected_error, match=error_message):
+            minibox._validate_inputs_load(
+                mini_box_id, boxsize, minisize, valid_dir, padding
+            )
+
+    def test_load_path_not_found(self, tmp_path):
+        """Test that non-existent load_path raises FileNotFoundError."""
+        missing_path = tmp_path / "does_not_exist"
+        with pytest.raises(FileNotFoundError, match="Load path does not exist"):
+            minibox._validate_inputs_load(0, 10.0, 1.0, missing_path, 0.0)
+
+    def test_load_path_not_directory(self, tmp_path):
+        """Test that non-directory load_path raises NotADirectoryError."""
+        file_path = tmp_path / "file.txt"
+        file_path.write_text("dummy")
+        with pytest.raises(NotADirectoryError, match="Load path is not a directory"):
+            minibox._validate_inputs_load(0, 10.0, 1.0, file_path, 0.0)
+
+    def test_edge_cases(self, tmp_path):
+        """Test edge cases with very small or large boxsize/minisize and numpy types."""
+        valid_dir = tmp_path / "edge"
+        valid_dir.mkdir()
+
+        # mini_box_id as numpy integer
+        minibox._validate_inputs_load(
+            numpy.int64(0), 1.0, 1.0, valid_dir, numpy.float64(0.0)
+        )
+
+        # Very large grid
+        minibox._validate_inputs_load(
+            0, 1e6, 1.0, valid_dir, 0.0
+        )
+
+        # Very small valid minisize
+        minibox._validate_inputs_load(
+            0, 1e-3, 1e-4, valid_dir, 0.0
+        )
+
 # Additional integration tests
+
+
 class TestValidationIntegration:
     """Integration tests for both validation functions together."""
 
@@ -986,7 +1100,7 @@ class TestGetAdjacentMiniBoxIds:
 
 class TestSplitSimulationIntoMiniBoxes:
     """Test suite for split_simulation_into_mini_boxes function."""
-    
+
     @pytest.fixture
     def temp_dir(self):
         """Create a temporary directory for test files."""
@@ -994,7 +1108,7 @@ class TestSplitSimulationIntoMiniBoxes:
         yield temp_dir
         # Cleanup
         shutil.rmtree(temp_dir, ignore_errors=True)
-    
+
     @pytest.fixture
     def basic_simulation_data(self):
         """Generate basic simulation data for testing."""
@@ -1003,7 +1117,7 @@ class TestSplitSimulationIntoMiniBoxes:
         velocities = numpy.random.rand(n_particles, 3) * 5.0
         uid = numpy.arange(n_particles, dtype=numpy.uint32)
         return positions, velocities, uid
-    
+
     @pytest.fixture
     def large_simulation_data(self):
         """Generate larger simulation data for performance testing."""
@@ -1012,7 +1126,7 @@ class TestSplitSimulationIntoMiniBoxes:
         velocities = numpy.random.randn(n_particles, 3) * 10.0
         uid = numpy.arange(n_particles, dtype=numpy.uint64)
         return positions, velocities, uid
-    
+
     @pytest.fixture
     def simulation_with_props(self):
         """Generate simulation data with additional properties."""
@@ -1020,61 +1134,65 @@ class TestSplitSimulationIntoMiniBoxes:
         positions = numpy.random.rand(n_particles, 3) * 20.0
         velocities = numpy.random.rand(n_particles, 3) * 8.0
         uid = numpy.arange(n_particles, dtype=numpy.uint32)
-        
+
         # Additional properties
-        masses = numpy.random.exponential(1e10, n_particles).astype(numpy.float32)
-        temperatures = numpy.random.exponential(1e6, n_particles).astype(numpy.float32)
-        
+        masses = numpy.random.exponential(
+            1e10, n_particles).astype(numpy.float32)
+        temperatures = numpy.random.exponential(
+            1e6, n_particles).astype(numpy.float32)
+
         props = (
             [masses, temperatures],
             ['mass', 'temperature'],
             [numpy.float32, numpy.float32]
         )
         return positions, velocities, uid, props
-    
-    def verify_hdf5_structure(self, file_path: Path, expected_datasets: List[str], 
-                             name: Optional[str] = None):
+
+    def verify_hdf5_structure(self, file_path: Path, expected_datasets: List[str],
+                              name: Optional[str] = None):
         """Verify HDF5 file structure and datasets."""
         with h5py.File(file_path, 'r') as f:
             prefix = f"{name}/" if name else ""
             for dataset in expected_datasets:
                 dataset_path = f"{prefix}{dataset}"
                 assert dataset_path in f, f"Dataset {dataset_path} not found in {file_path}"
-                assert isinstance(f[dataset_path], h5py.Dataset), f"{dataset_path} is not a dataset"
-    
+                assert isinstance(
+                    f[dataset_path], h5py.Dataset), f"{dataset_path} is not a dataset"
+
     def verify_data_consistency(self, file_path: Path, original_positions: numpy.ndarray,
-                               original_velocities: numpy.ndarray, original_uid: numpy.ndarray,
-                               boxsize: float, minisize: float, mini_box_id: int,
-                               name: Optional[str] = None, props: Optional[Tuple] = None):
+                                original_velocities: numpy.ndarray, original_uid: numpy.ndarray,
+                                boxsize: float, minisize: float, mini_box_id: int,
+                                name: Optional[str] = None, props: Optional[Tuple] = None):
         """Verify that saved data is consistent with original data."""
         with h5py.File(file_path, 'r') as f:
             prefix = f"{name}/" if name else ""
-            
+
             # Load saved data
             saved_positions = f[f"{prefix}pos"][:]
             saved_velocities = f[f"{prefix}vel"][:]
             saved_uid = f[f"{prefix}ID"][:]
-            
+
             # Verify shapes
             n_particles_in_box = saved_positions.shape[0]
             assert saved_velocities.shape[0] == n_particles_in_box
             assert saved_uid.shape[0] == n_particles_in_box
-            
+
             # Verify all particles belong to this mini box
-            computed_ids = minibox.get_mini_box_id(saved_positions, boxsize, minisize)
+            computed_ids = minibox.get_mini_box_id(
+                saved_positions, boxsize, minisize)
             if isinstance(computed_ids, numpy.ndarray):
                 assert numpy.all(computed_ids == mini_box_id), \
                     f"Not all particles belong to mini box {mini_box_id}"
             else:
                 assert computed_ids == mini_box_id, \
                     f"Particle doesn't belong to mini box {mini_box_id}"
-            
+
             # Verify data integrity by checking if saved UIDs exist in original data
             original_uid_set = set(original_uid)
             for saved_id in saved_uid:
                 assert saved_id in original_uid_set, \
                     f"Saved UID {saved_id} not found in original data"
-            
+
             # If props are provided, verify them too
             if props:
                 arrays, labels, dtypes = props
@@ -1084,13 +1202,13 @@ class TestSplitSimulationIntoMiniBoxes:
                         f"Property {label} has inconsistent number of particles"
                     assert saved_prop.dtype == dtypes[i], \
                         f"Property {label} has incorrect dtype"
-    
+
     def test_basic_functionality(self, temp_dir, basic_simulation_data):
         """Test basic functionality with simple data."""
         positions, velocities, uid = basic_simulation_data
         boxsize = 10.0
         minisize = 2.0
-        
+
         minibox.split_simulation_into_mini_boxes(
             positions=positions,
             velocities=velocities,
@@ -1099,28 +1217,28 @@ class TestSplitSimulationIntoMiniBoxes:
             boxsize=boxsize,
             minisize=minisize
         )
-        
+
         # Verify directory structure
         cells_per_side = int(numpy.ceil(boxsize / minisize))
         output_dir = Path(temp_dir) / f"mini_boxes_nside_{cells_per_side}"
         assert output_dir.exists(), "Output directory not created"
-        
+
         # Verify files were created
         hdf5_files = list(output_dir.glob("*.hdf5"))
         assert len(hdf5_files) > 0, "No HDF5 files created"
-        
+
         # Verify file structure
         expected_datasets = ['ID', 'pos', 'vel']
         for file_path in hdf5_files:
             self.verify_hdf5_structure(file_path, expected_datasets)
-    
+
     def test_with_name_parameter(self, temp_dir, basic_simulation_data):
         """Test functionality with name parameter."""
         positions, velocities, uid = basic_simulation_data
         boxsize = 10.0
         minisize = 2.0
         name = "test_simulation"
-        
+
         minibox.split_simulation_into_mini_boxes(
             positions=positions,
             velocities=velocities,
@@ -1130,23 +1248,23 @@ class TestSplitSimulationIntoMiniBoxes:
             minisize=minisize,
             name=name
         )
-        
+
         # Verify directory structure
         cells_per_side = int(numpy.ceil(boxsize / minisize))
         output_dir = Path(temp_dir) / f"mini_boxes_nside_{cells_per_side}"
-        
+
         # Verify file structure with name prefix
         expected_datasets = ['ID', 'pos', 'vel']
         hdf5_files = list(output_dir.glob("*.hdf5"))
         for file_path in hdf5_files:
             self.verify_hdf5_structure(file_path, expected_datasets, name)
-    
+
     def test_with_additional_properties(self, temp_dir, simulation_with_props):
         """Test functionality with additional particle properties."""
         positions, velocities, uid, props = simulation_with_props
         boxsize = 20.0
         minisize = 4.0
-        
+
         minibox.split_simulation_into_mini_boxes(
             positions=positions,
             velocities=velocities,
@@ -1156,17 +1274,17 @@ class TestSplitSimulationIntoMiniBoxes:
             minisize=minisize,
             props=props
         )
-        
+
         # Verify directory structure
         cells_per_side = int(numpy.ceil(boxsize / minisize))
         output_dir = Path(temp_dir) / f"mini_boxes_nside_{cells_per_side}"
-        
+
         # Verify file structure with additional properties
         expected_datasets = ['ID', 'pos', 'vel', 'mass', 'temperature']
         hdf5_files = list(output_dir.glob("*.hdf5"))
         for file_path in hdf5_files:
             self.verify_hdf5_structure(file_path, expected_datasets)
-    
+
     @pytest.mark.parametrize("boxsize,minisize,expected_cells", [
         (10.0, 2.0, 5),
         (10.0, 3.0, 4),
@@ -1175,12 +1293,12 @@ class TestSplitSimulationIntoMiniBoxes:
         (100.0, 25.0, 4)
     ])
     def test_different_box_configurations(self, temp_dir, basic_simulation_data,
-                                        boxsize, minisize, expected_cells):
+                                          boxsize, minisize, expected_cells):
         """Test with different box size configurations."""
         positions, velocities, uid = basic_simulation_data
         # Scale positions to fit the box
         positions = positions * (boxsize / 10.0)
-        
+
         minibox.split_simulation_into_mini_boxes(
             positions=positions,
             velocities=velocities,
@@ -1189,17 +1307,18 @@ class TestSplitSimulationIntoMiniBoxes:
             boxsize=boxsize,
             minisize=minisize
         )
-        
+
         # Verify correct number of cells
         output_dir = Path(temp_dir) / f"mini_boxes_nside_{expected_cells}"
-        assert output_dir.exists(), f"Expected directory with {expected_cells} cells per side"
-    
+        assert output_dir.exists(
+        ), f"Expected directory with {expected_cells} cells per side"
+
     def test_data_consistency(self, temp_dir, basic_simulation_data):
         """Test that saved data is consistent with original data."""
         positions, velocities, uid = basic_simulation_data
         boxsize = 10.0
         minisize = 2.0
-        
+
         minibox.split_simulation_into_mini_boxes(
             positions=positions,
             velocities=velocities,
@@ -1208,11 +1327,11 @@ class TestSplitSimulationIntoMiniBoxes:
             boxsize=boxsize,
             minisize=minisize
         )
-        
+
         # Verify data consistency
         cells_per_side = int(numpy.ceil(boxsize / minisize))
         output_dir = Path(temp_dir) / f"mini_boxes_nside_{cells_per_side}"
-        
+
         hdf5_files = list(output_dir.glob("*.hdf5"))
         for file_path in hdf5_files:
             mini_box_id = int(file_path.stem)
@@ -1220,13 +1339,13 @@ class TestSplitSimulationIntoMiniBoxes:
                 file_path, positions, velocities, uid,
                 boxsize, minisize, mini_box_id
             )
-    
+
     def test_particle_count_conservation(self, temp_dir, basic_simulation_data):
         """Test that all particles are saved and none are lost or duplicated."""
         positions, velocities, uid = basic_simulation_data
         boxsize = 10.0
         minisize = 2.0
-        
+
         minibox.split_simulation_into_mini_boxes(
             positions=positions,
             velocities=velocities,
@@ -1235,35 +1354,35 @@ class TestSplitSimulationIntoMiniBoxes:
             boxsize=boxsize,
             minisize=minisize
         )
-        
+
         # Count total particles across all files
         cells_per_side = int(numpy.ceil(boxsize / minisize))
         output_dir = Path(temp_dir) / f"mini_boxes_nside_{cells_per_side}"
-        
+
         total_saved_particles = 0
         all_saved_uids = []
-        
+
         hdf5_files = list(output_dir.glob("*.hdf5"))
         for file_path in hdf5_files:
             with h5py.File(file_path, 'r') as f:
                 n_particles = f['ID'].shape[0]
                 total_saved_particles += n_particles
                 all_saved_uids.extend(f['ID'][:])
-        
+
         # Verify particle count
         assert total_saved_particles == len(positions), \
             f"Particle count mismatch: original {len(positions)}, saved {total_saved_particles}"
-        
+
         # Verify no duplicates
         assert len(set(all_saved_uids)) == len(all_saved_uids), \
             "Duplicate particles found in saved files"
-        
+
         # Verify all original UIDs are present
         original_uid_set = set(uid)
         saved_uid_set = set(all_saved_uids)
         assert original_uid_set == saved_uid_set, \
             "Saved UIDs don't match original UIDs"
-    
+
     # def test_empty_mini_boxes_handling(self, temp_dir):
     #     """Test behavior with sparse data leading to empty mini boxes."""
     #     # Create data clustered in one corner
@@ -1271,10 +1390,10 @@ class TestSplitSimulationIntoMiniBoxes:
     #     positions = numpy.random.rand(n_particles, 3) * 2.0  # Only in corner
     #     velocities = numpy.random.rand(n_particles, 3) * 5.0
     #     uid = numpy.arange(n_particles, dtype=numpy.uint32)
-        
+
     #     boxsize = 20.0  # Much larger box
     #     minisize = 2.0
-        
+
     #     minibox.split_simulation_into_mini_boxes(
     #         positions=positions,
     #         velocities=velocities,
@@ -1283,25 +1402,25 @@ class TestSplitSimulationIntoMiniBoxes:
     #         boxsize=boxsize,
     #         minisize=minisize
     #     )
-        
+
     #     # Verify only some files are created (not all mini boxes have particles)
     #     cells_per_side = int(numpy.ceil(boxsize / minisize))
     #     output_dir = Path(temp_dir) / f"mini_boxes_nside_{cells_per_side}"
-        
+
     #     hdf5_files = list(output_dir.glob("*.hdf5"))
     #     total_possible_boxes = cells_per_side ** 3
-        
+
     #     # Should have fewer files than total possible boxes
     #     assert len(hdf5_files) < total_possible_boxes, \
     #         "Expected some empty mini boxes, but all were created"
     #     assert len(hdf5_files) > 0, "No files created"
-    
+
     def test_large_simulation(self, temp_dir, large_simulation_data):
         """Test with larger simulation data."""
         positions, velocities, uid = large_simulation_data
         boxsize = 100.0
         minisize = 10.0
-        
+
         minibox.split_simulation_into_mini_boxes(
             positions=positions,
             velocities=velocities,
@@ -1310,20 +1429,20 @@ class TestSplitSimulationIntoMiniBoxes:
             boxsize=boxsize,
             minisize=minisize
         )
-        
+
         # Verify particle conservation
         cells_per_side = int(numpy.ceil(boxsize / minisize))
         output_dir = Path(temp_dir) / f"mini_boxes_nside_{cells_per_side}"
-        
+
         total_particles = 0
         hdf5_files = list(output_dir.glob("*.hdf5"))
         for file_path in hdf5_files:
             with h5py.File(file_path, 'r') as f:
                 total_particles += f['ID'].shape[0]
-        
+
         assert total_particles == len(positions), \
             f"Particle count mismatch in large simulation: {total_particles} vs {len(positions)}"
-    
+
     @pytest.mark.parametrize("invalid_positions", [
         numpy.random.rand(100, 2),  # Wrong number of columns
         numpy.random.rand(100),     # 1D array
@@ -1333,7 +1452,7 @@ class TestSplitSimulationIntoMiniBoxes:
         """Test validation of positions array shape."""
         velocities = numpy.random.rand(100, 3)
         uid = numpy.arange(100)
-        
+
         with pytest.raises(ValueError, match="positions must have shape"):
             minibox.split_simulation_into_mini_boxes(
                 positions=invalid_positions,
@@ -1343,7 +1462,7 @@ class TestSplitSimulationIntoMiniBoxes:
                 boxsize=10.0,
                 minisize=2.0
             )
-    
+
     @pytest.mark.parametrize("invalid_velocities", [
         numpy.random.rand(100, 2),  # Wrong number of columns
         numpy.random.rand(100),     # 1D array
@@ -1353,7 +1472,7 @@ class TestSplitSimulationIntoMiniBoxes:
         """Test validation of velocities array shape."""
         positions = numpy.random.rand(100, 3)
         uid = numpy.arange(100)
-        
+
         with pytest.raises(ValueError):
             minibox.split_simulation_into_mini_boxes(
                 positions=positions,
@@ -1363,7 +1482,7 @@ class TestSplitSimulationIntoMiniBoxes:
                 boxsize=10.0,
                 minisize=2.0
             )
-    
+
     @pytest.mark.parametrize("invalid_uid", [
         numpy.random.rand(100, 2),  # 2D array
         numpy.arange(50),           # Wrong length
@@ -1372,7 +1491,7 @@ class TestSplitSimulationIntoMiniBoxes:
         """Test validation of uid array shape."""
         positions = numpy.random.rand(100, 3)
         velocities = numpy.random.rand(100, 3)
-        
+
         with pytest.raises(ValueError):
             minibox.split_simulation_into_mini_boxes(
                 positions=positions,
@@ -1382,7 +1501,7 @@ class TestSplitSimulationIntoMiniBoxes:
                 boxsize=10.0,
                 minisize=2.0
             )
-    
+
     @pytest.mark.parametrize("boxsize,minisize,expected_error", [
         (0, 2.0, "boxsize must be positive"),
         (-5.0, 2.0, "boxsize must be positive"),
@@ -1393,10 +1512,10 @@ class TestSplitSimulationIntoMiniBoxes:
         (10.0, "2.0", "boxsize and minisize must be numeric"),
     ])
     def test_invalid_box_parameters(self, temp_dir, basic_simulation_data,
-                                   boxsize, minisize, expected_error):
+                                    boxsize, minisize, expected_error):
         """Test validation of box size parameters."""
         positions, velocities, uid = basic_simulation_data
-        
+
         with pytest.raises((ValueError, TypeError), match=expected_error):
             minibox.split_simulation_into_mini_boxes(
                 positions=positions,
@@ -1406,13 +1525,13 @@ class TestSplitSimulationIntoMiniBoxes:
                 boxsize=boxsize,
                 minisize=minisize
             )
-    
+
     def test_empty_arrays(self, temp_dir):
         """Test behavior with empty input arrays."""
         positions = numpy.empty((0, 3))
         velocities = numpy.empty((0, 3))
         uid = numpy.empty(0, dtype=int)
-        
+
         with pytest.raises(ValueError, match="No particles provided"):
             minibox.split_simulation_into_mini_boxes(
                 positions=positions,
@@ -1422,14 +1541,14 @@ class TestSplitSimulationIntoMiniBoxes:
                 boxsize=10.0,
                 minisize=2.0
             )
-    
+
     def test_invalid_props_structure(self, temp_dir, basic_simulation_data):
         """Test validation of props parameter structure."""
         positions, velocities, uid = basic_simulation_data
-        
+
         # Test with wrong tuple length
         invalid_props = ([numpy.random.rand(100)], ["mass"])  # Missing dtypes
-        
+
         with pytest.raises(ValueError, match="props must be a tuple of"):
             minibox.split_simulation_into_mini_boxes(
                 positions=positions,
@@ -1440,18 +1559,18 @@ class TestSplitSimulationIntoMiniBoxes:
                 minisize=2.0,
                 props=invalid_props
             )
-    
+
     def test_mismatched_props_arrays(self, temp_dir, basic_simulation_data):
         """Test validation of props arrays with mismatched lengths."""
         positions, velocities, uid = basic_simulation_data
-        
+
         # Props array with wrong length
         invalid_props = (
             [numpy.random.rand(50)],  # Wrong length
             ["mass"],
             [numpy.float32]
         )
-        
+
         with pytest.raises(ValueError, match="must have.*elements"):
             minibox.split_simulation_into_mini_boxes(
                 positions=positions,
@@ -1462,7 +1581,7 @@ class TestSplitSimulationIntoMiniBoxes:
                 minisize=2.0,
                 props=invalid_props
             )
-    
+
     def test_boundary_particles(self, temp_dir):
         """Test handling of particles at box boundaries."""
         # Create particles exactly at boundaries
@@ -1474,10 +1593,10 @@ class TestSplitSimulationIntoMiniBoxes:
         ])
         velocities = numpy.random.rand(4, 3)
         uid = numpy.arange(4)
-        
+
         boxsize = 10.0
         minisize = 5.0
-        
+
         minibox.split_simulation_into_mini_boxes(
             positions=positions,
             velocities=velocities,
@@ -1486,16 +1605,231 @@ class TestSplitSimulationIntoMiniBoxes:
             boxsize=boxsize,
             minisize=minisize
         )
-        
+
         # Verify all particles are saved
         cells_per_side = int(numpy.ceil(boxsize / minisize))
         output_dir = Path(temp_dir) / f"mini_boxes_nside_{cells_per_side}"
-        
+
         total_particles = 0
         hdf5_files = list(output_dir.glob("*.hdf5"))
         for file_path in hdf5_files:
             with h5py.File(file_path, 'r') as f:
                 total_particles += f['ID'].shape[0]
-        
+
         assert total_particles == 4, "Not all boundary particles were saved"
 
+
+# --------------------
+# Low-level file makers
+# --------------------
+def _make_particle_file(path: Path, positions, velocities, ids):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with h5py.File(path, "w") as f:
+        grp = f.create_group("part")
+        grp.create_dataset("pos", data=positions)
+        grp.create_dataset("vel", data=velocities)
+        grp.create_dataset("ID", data=ids)
+
+
+def _make_seed_file(path: Path, positions, velocities, ids, r200, m200, rs):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with h5py.File(path, "w") as f:
+        grp = f.create_group("seed")
+        grp.create_dataset("pos", data=positions)
+        grp.create_dataset("vel", data=velocities)
+        grp.create_dataset("ID", data=ids)
+        grp.create_dataset("R200b", data=r200)
+        grp.create_dataset("M200b", data=m200)
+        grp.create_dataset("Rs", data=rs)
+
+
+# ------------------------
+# High-level test utilities
+# ------------------------
+def make_all_particle_files(tmp_path, mini_box_id, boxsize, minisize, with_particle=True):
+    """Create particle files for target + neighbors. Only target has one particle if with_particle=True."""
+    cells_per_side = int(numpy.ceil(boxsize / minisize))
+    mini_box_ids = minibox.get_adjacent_mini_box_ids(
+        mini_box_id, boxsize, minisize)
+    subdir = tmp_path / f"mini_boxes_nside_{cells_per_side}"
+
+    # Compute center of target mini-box
+    i = mini_box_id // (cells_per_side**2)
+    remainder = mini_box_id % (cells_per_side**2)
+    j = remainder // cells_per_side
+    k = remainder % cells_per_side
+    center = numpy.array([(k + 0.5) * minisize, (j + 0.5)
+                         * minisize, (i + 0.5) * minisize])
+
+    for mb in mini_box_ids:
+        file_path = subdir / f"{mb}.hdf5"
+        if mb == mini_box_id and with_particle:
+            _make_particle_file(
+                file_path,
+                positions=numpy.array([center]),
+                velocities=numpy.array([[1.0, 1.0, 1.0]]),
+                ids=numpy.array([42], dtype=int),
+            )
+        else:
+            _make_particle_file(
+                file_path,
+                positions=numpy.empty((0, 3)),
+                velocities=numpy.empty((0, 3)),
+                ids=numpy.empty((0,), dtype=int),
+            )
+
+
+def make_all_seed_files(tmp_path, mini_box_id, boxsize, minisize, with_seed=True):
+    """Create seed files for target + neighbors. Only target has one seed if with_seed=True."""
+    cells_per_side = int(numpy.ceil(boxsize / minisize))
+    mini_box_ids = minibox.get_adjacent_mini_box_ids(
+        mini_box_id, boxsize, minisize)
+    subdir = tmp_path / f"mini_boxes_nside_{cells_per_side}"
+
+    # Compute center of target mini-box
+    i = mini_box_id // (cells_per_side**2)
+    remainder = mini_box_id % (cells_per_side**2)
+    j = remainder // cells_per_side
+    k = remainder % cells_per_side
+    center = numpy.array([(k + 0.5) * minisize, (j + 0.5)
+                         * minisize, (i + 0.5) * minisize])
+
+    for mb in mini_box_ids:
+        file_path = subdir / f"{mb}.hdf5"
+        if mb == mini_box_id and with_seed:
+            _make_seed_file(
+                file_path,
+                positions=numpy.array([center]),
+                velocities=numpy.array([[1.0, 1.0, 1.0]]),
+                ids=numpy.array([7], dtype=int),
+                r200=numpy.array([10.0]),
+                m200=numpy.array([20.0]),
+                rs=numpy.array([1.0]),
+            )
+        else:
+            _make_seed_file(
+                file_path,
+                positions=numpy.empty((0, 3)),
+                velocities=numpy.empty((0, 3)),
+                ids=numpy.empty((0,), dtype=int),
+                r200=numpy.empty((0,)),
+                m200=numpy.empty((0,)),
+                rs=numpy.empty((0,)),
+            )
+
+
+class TestLoadParticles:
+    def test_valid_inputs(self, tmp_path):
+        make_all_particle_files(tmp_path, mini_box_id=0,
+                                boxsize=10.0, minisize=1.0, with_particle=True)
+
+        pos, vel, ids = minibox.load_particles(
+            0, 10.0, 1.0, str(tmp_path) + "/", padding=1.0
+        )
+
+        assert pos.shape == (1, 3)
+        assert vel.shape == (1, 3)
+        assert ids.shape == (1,)
+        assert int(ids[0]) == 42
+
+    def test_runtime_error_when_no_particles(self, tmp_path):
+        make_all_particle_files(tmp_path, 0, 10.0, 10.0, with_particle=False)
+
+        with pytest.raises(RuntimeError, match="No particles found"):
+            minibox.load_particles(
+                0, 10.0, 10.0, str(tmp_path) + "/", padding=1.0)
+
+    @pytest.mark.parametrize(
+        "mini_box_id, boxsize, minisize, load_path, padding, expected_error",
+        [
+            ("0", 10.0, 10.0, "some/path", 1.0, TypeError),
+            (0, "10", 10.0, "some/path", 1.0, TypeError),
+            (0, 10.0, "10", "some/path", 1.0, TypeError),
+            (0, 10.0, 10.0, 123, 1.0, TypeError),
+            (0, 10.0, 10.0, "some/path", "1.0", TypeError),
+        ],
+    )
+    def test_type_errors(self, mini_box_id, boxsize, minisize, load_path, padding, expected_error):
+        with pytest.raises(expected_error):
+            minibox.load_particles(mini_box_id, boxsize,
+                                   minisize, load_path, padding)
+
+    def test_value_errors_and_file_errors(self, tmp_path):
+        subdir = tmp_path / "mini_boxes_nside_1"
+        subdir.mkdir()
+
+        # Negative ID
+        with pytest.raises(ValueError, match="mini_box_id must be non-negative"):
+            minibox.load_particles(-1, 10.0, 10.0, str(tmp_path) + "/", 1.0)
+
+        # Missing file
+        with pytest.raises(FileNotFoundError):
+            minibox.load_particles(0, 10.0, 10.0, str(tmp_path) + "/", 1.0)
+
+        # Not a directory
+        file_path = tmp_path / "not_a_dir.hdf5"
+        file_path.write_text("x")
+        with pytest.raises(NotADirectoryError):
+            minibox.load_particles(0, 10.0, 10.0, file_path, 1.0)
+
+
+# --------------
+# Tests: Seeds
+# --------------
+class TestLoadSeeds:
+    def test_valid_inputs(self, tmp_path):
+        make_all_seed_files(tmp_path, mini_box_id=0,
+                            boxsize=10.0, minisize=1.0, with_seed=True)
+
+        pos, vel, ids, r200, m200, rs, mask = minibox.load_seeds(
+            0, 10.0, 1.0, str(tmp_path) + "/", padding=1.0
+        )
+
+        assert pos.shape == (1, 3)
+        assert vel.shape == (1, 3)
+        assert ids.shape == (1,)
+        assert r200.shape == (1,)
+        assert m200.shape == (1,)
+        assert rs.shape == (1,)
+        assert mask.shape == (1,)
+        assert int(ids[0]) == 7
+        assert pytest.approx(float(m200[0])) == 20.0
+
+    def test_runtime_error_when_no_seeds(self, tmp_path):
+        make_all_seed_files(tmp_path, 0, 10.0, 10.0, with_seed=False)
+
+        with pytest.raises(RuntimeError, match="No seeds found"):
+            minibox.load_seeds(0, 10.0, 10.0, str(tmp_path) + "/", padding=1.0)
+
+    @pytest.mark.parametrize(
+        "mini_box_id, boxsize, minisize, load_path, padding, expected_error",
+        [
+            ("0", 10.0, 10.0, "some/path", 1.0, TypeError),
+            (0, "10", 10.0, "some/path", 1.0, TypeError),
+            (0, 10.0, "10", "some/path", 1.0, TypeError),
+            (0, 10.0, 10.0, 123, 1.0, TypeError),
+            (0, 10.0, 10.0, "some/path", "1.0", TypeError),
+        ],
+    )
+    def test_type_errors(self, mini_box_id, boxsize, minisize, load_path, padding, expected_error):
+        with pytest.raises(expected_error):
+            minibox.load_seeds(mini_box_id, boxsize,
+                               minisize, load_path, padding)
+
+    def test_value_errors_and_file_errors(self, tmp_path):
+        subdir = tmp_path / "mini_boxes_nside_1"
+        subdir.mkdir()
+
+        # Negative ID
+        with pytest.raises(ValueError, match="mini_box_id must be non-negative"):
+            minibox.load_seeds(-1, 10.0, 10.0, str(tmp_path) + "/", 1.0)
+
+        # Missing file
+        with pytest.raises(FileNotFoundError):
+            minibox.load_seeds(0, 10.0, 10.0, str(tmp_path) + "/", 1.0)
+
+        # Not a directory
+        file_path = tmp_path / "not_a_dir.hdf5"
+        file_path.write_text("x")
+        with pytest.raises(NotADirectoryError):
+            minibox.load_seeds(0, 10.0, 10.0, file_path, 1.0)
