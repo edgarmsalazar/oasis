@@ -12,7 +12,7 @@ G_gravity: float = 4.3e-09     # Mpc (km/s)^2 / M_sun
 
 
 @dataclass(frozen=True)
-class F:
+class AnsiColor:
     """
     """
     HEADER: str = "\033[35m "
@@ -63,17 +63,17 @@ def timer(
         finish = datetime.now()
         dt = timedelta(seconds=time()-t_start)
         if fancy:
-            label = f"\t{F.BOLD}Process:{F.ENDC} " \
-                f"{F.FAIL}{procedure.__name__}{F.ENDC} \n" \
-                f"Start:  {F.OKBLUE}{start.strftime(fmt)}{F.ENDC} \n" \
-                f"Finish: {F.OKBLUE}{finish.strftime(fmt)}{F.ENDC} \n" \
-                f"{F.BULLET}{F.BOLD}{F.OKGREEN} Elapsed time:{F.ENDC} " \
-                f"{F.WARNING}{dt}{F.ENDC}"
+            label = f"\t{AnsiColor.BOLD}Process:{AnsiColor.ENDC} " \
+                f"{AnsiColor.FAIL}{procedure.__name__}{AnsiColor.ENDC} \n" \
+                f"Start:  {AnsiColor.OKBLUE}{start.strftime(fmt)}{AnsiColor.ENDC} \n" \
+                f"Finish: {AnsiColor.OKBLUE}{finish.strftime(fmt)}{AnsiColor.ENDC} \n" \
+                f"{AnsiColor.BULLET}{AnsiColor.BOLD}{AnsiColor.OKGREEN} Elapsed time:{AnsiColor.ENDC} " \
+                f"{AnsiColor.WARNING}{dt}{AnsiColor.ENDC}"
         else:
             label = f"\t Process: {procedure.__name__} \n" \
                 f"Start:  {start.strftime(fmt)} \n" \
                 f"Finish: {finish.strftime(fmt)} \n" \
-                f"{F.BULLET} Elapsed time: {dt}"
+                f"{AnsiColor.BULLET} Elapsed time: {dt}"
         if not off:
             print(label)
 
