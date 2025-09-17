@@ -303,6 +303,8 @@ class TestValidateInputsExistingPath:
         # Should not raise exceptionss
         with pytest.raises(NotADirectoryError):
             common._validate_inputs_existing_path(valid_file)
+        
+        with pytest.raises(NotADirectoryError):
             common._validate_inputs_existing_path(str(valid_file))
 
     @pytest.mark.parametrize(
