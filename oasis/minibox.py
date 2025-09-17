@@ -5,11 +5,11 @@ import h5py
 import numpy
 from tqdm import tqdm
 
-from oasis.common import (_validate_inputs_boxsize_minisize,
+from oasis.common import (_validate_inputs_box_partitioning,
+                          _validate_inputs_boxsize_minisize,
                           _validate_inputs_coordinate_arrays,
-                          _validate_inputs_load, ensure_dir_exists,
-                          _validate_inputs_mini_box_id,
-                          get_min_unit_dtype)
+                          _validate_inputs_load, _validate_inputs_mini_box_id,
+                          ensure_dir_exists, get_min_unit_dtype)
 from oasis.coordinates import relative_coordinates
 
 __all__ = [
@@ -19,7 +19,6 @@ __all__ = [
     'load_particles',
     'load_seeds',
 ]
-
 
 
 def get_mini_box_id(
@@ -113,10 +112,13 @@ def get_mini_box_id(
             "Grid index computation resulted in out-of-bounds indices")
 
     # Compute unique IDs using dot product for efficiency
-    ids = numpy.sum(shift * grid_indices, axis=1)
+    if grid_indices.ndim == 1:
+        ids = int(numpy.dot(shift, grid_indices))
+    else:
+        ids = numpy.sum(shift * grid_indices, axis=1)
 
     # Return appropriate type based on input
-    return ids[0] if ids.shape[0] == 1 else ids
+    return ids
 
 
 def get_adjacent_mini_box_ids(

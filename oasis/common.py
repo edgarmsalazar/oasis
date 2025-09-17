@@ -341,7 +341,6 @@ def _validate_inputs_box_partitioning(positions, velocities, uid, props):
                     f"props array {i} must have {n_particles} elements")
 
 
-
 def _validate_inputs_load(
     mini_box_id: int,
     boxsize: float,

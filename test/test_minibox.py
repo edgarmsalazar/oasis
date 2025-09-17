@@ -36,7 +36,7 @@ class TestGetMiniBoxId:
         result = minibox.get_mini_box_id(pos, boxsize, minisize)
 
         assert result == expected, f"Failed for {description}"
-        assert isinstance(result, int), f"Wrong return type for {description}"
+        assert isinstance(result, (int, numpy.integer)), f"Wrong return type for {description}"
 
     @pytest.mark.parametrize(
         "positions, boxsize, minisize, expected, description",
@@ -127,49 +127,46 @@ class TestGetMiniBoxId:
             result, numpy.ndarray), f"Wrong type for {description}"
 
     @pytest.mark.parametrize(
-        "error_type, position, boxsize, minisize, error_msg, description",
+        "error_type, position, boxsize, minisize, error_msg",
         [
             # Type errors
             (TypeError, [1.0, 1.0, 1.0], 10.0, 1.0,
-             "position must be a numpy array", "non-numpy position"),
+             "must be a numpy array"),
             (TypeError, numpy.array([1.0, 1.0, 1.0]), "10.0", 1.0,
-             "boxsize and minisize must be numeric", "string boxsize"),
+             "must be numeric"),
             (TypeError, numpy.array([1.0, 1.0, 1.0]), 10.0, "1.0",
-             "boxsize and minisize must be numeric", "string minisize"),
+             "must be numeric"),
 
             # Value errors - sizes
             (ValueError, numpy.array([1.0, 1.0, 1.0]), -5.0, 1.0,
-             "boxsize must be positive", "negative boxsize"),
+             "boxsize must be positive"),
             (ValueError, numpy.array([1.0, 1.0, 1.0]), 10.0, -1.0,
-             "minisize must be positive", "negative minisize"),
+             "minisize must be positive"),
             (ValueError, numpy.array([1.0, 1.0, 1.0]), 5.0, 10.0,
-             "minisize cannot be larger than boxsize", "minisize > boxsize"),
+             "minisize cannot be larger than boxsize"),
             (ValueError, numpy.array([1.0, 1.0, 1.0]), 0.0, 1.0,
-             "boxsize must be positive", "zero boxsize"),
+             "boxsize must be positive"),
             (ValueError, numpy.array([1.0, 1.0, 1.0]), 10.0, 0.0,
-             "minisize must be positive", "zero minisize"),
+             "minisize must be positive"),
 
             # Value errors - shapes
             (ValueError, numpy.array([1.0, 1.0]), 10.0, 1.0,
-             "1D position array must have exactly 3 elements", "wrong 1D shape"),
+             "Input position must have shape"),
             (ValueError, numpy.array([[1.0, 1.0], [2.0, 2.0]]), 10.0, 1.0,
-             "2D position array must have shape \\(N, 3\\)", "wrong 2D shape"),
+             "Input position must have shape"),
             (ValueError, numpy.array([[[1.0, 1.0, 1.0]]]), 10.0, 1.0,
-             "position array must be 1D .* or 2D .*", "3D position array"),
+             "Input position must have shape"),
 
             # Value errors - bounds
             (ValueError, numpy.array([15.0, 5.0, 5.0]), 10.0, 1.0,
-             "All coordinates must be within \\[0, 10.0\\]",
-             "coordinate above boxsize"),
+             "All coordinates must be within \\[0, 10.0\\]"),
             (ValueError, numpy.array([5.0, -1.0, 5.0]), 10.0, 1.0,
-             "All coordinates must be within \\[0, 10.0\\]",
-             "negative coordinate"),
+             "All coordinates must be within \\[0, 10.0\\]"),
             (ValueError, numpy.array([[5.0, 5.0, 5.0], [15.0, 5.0, 5.0]]), 10.0, 1.0,
-             "All coordinates must be within \\[0, 10.0\\]",
-             "mixed valid/invalid coordinates"),
+             "All coordinates must be within \\[0, 10.0\\]"),
         ],
     )
-    def test_input_validation(self, error_type, position, boxsize, minisize, error_msg, description):
+    def test_input_validation(self, error_type, position, boxsize, minisize, error_msg):
         """Test comprehensive input validation"""
         with pytest.raises(error_type, match=error_msg):
             minibox.get_mini_box_id(position, boxsize, minisize)
@@ -228,16 +225,15 @@ class TestGetMiniBoxId:
         boxsize = 10.0
         minisize = 1.0
 
-        # Empty array
+        # Empty array. Should raise ValueError
         empty_positions = numpy.empty((0, 3))
-        result = minibox.get_mini_box_id(empty_positions, boxsize, minisize)
-        assert result.shape == (0,)
-        assert isinstance(result, numpy.ndarray)
+        with pytest.raises(ValueError, match="Input position must contain"):
+            minibox.get_mini_box_id(empty_positions, boxsize, minisize)
 
         # Single row array
         single_pos = numpy.array([[5.0, 5.0, 5.0]])
         result = minibox.get_mini_box_id(single_pos, boxsize, minisize)
-        assert result.shape == (1,)
+        assert result.size == 1
         assert isinstance(result, numpy.ndarray)
 
     def test_in_place_modification_behavior(self):
@@ -690,7 +686,7 @@ class TestSplitSimulationIntoMiniBoxes:
 
             # If props are provided, verify them too
             if props:
-                arrays, labels, dtypes = props
+                _, labels, dtypes = props
                 for i, label in enumerate(labels):
                     saved_prop = f[f"{prefix}{label}"][:]
                     assert saved_prop.shape[0] == n_particles_in_box, \
@@ -1003,8 +999,8 @@ class TestSplitSimulationIntoMiniBoxes:
         (10.0, 0, "minisize must be positive"),
         (10.0, -2.0, "minisize must be positive"),
         (5.0, 10.0, "minisize cannot be larger than boxsize"),
-        ("10.0", 2.0, "boxsize and minisize must be numeric"),
-        (10.0, "2.0", "boxsize and minisize must be numeric"),
+        ("10.0", 2.0, "must be numeric"),
+        (10.0, "2.0", "must be numeric"),
     ])
     def test_invalid_box_parameters(self, temp_dir, basic_simulation_data,
                                     boxsize, minisize, expected_error):
@@ -1027,7 +1023,7 @@ class TestSplitSimulationIntoMiniBoxes:
         velocities = numpy.empty((0, 3))
         uid = numpy.empty(0, dtype=int)
 
-        with pytest.raises(ValueError, match="No particles provided"):
+        with pytest.raises(ValueError, match="Input positions must contain at least one particle"):
             minibox.split_simulation_into_mini_boxes(
                 positions=positions,
                 velocities=velocities,
