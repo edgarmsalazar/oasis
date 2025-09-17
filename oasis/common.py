@@ -233,4 +233,133 @@ def ensure_dir_exists(
         raise OSError(f"Failed to create directory {path_obj}: {e}") from e
 
 
+def _validate_inputs_positive_number(value, name):
+    """Validate that a value is a positive number."""
+    if not isinstance(value, (int, float, numpy.number)):
+        raise TypeError(f"{name} must be numeric")
+    if value <= 0:
+        raise ValueError(f"{name} must be positive")
+
+
+def _validate_inputs_coordinate_arrays(arr, name):
+    """Validate coordinate arrays and raise appropriate errors."""
+    if not isinstance(arr, numpy.ndarray):
+        raise TypeError("Input must be a numpy array")
+
+    if arr.shape[0] == 0:
+        raise ValueError(f"Input {name} must contain at least one particle")
+
+    if (arr.ndim == 1 and arr.shape[0] != 3) or (arr.ndim == 2 and arr.shape[1] != 3):
+        raise ValueError(f"Input {name} must have shape (3,) or (n_particles, 3)")
+    
+
+def _validate_inputs_existing_path(path):
+    """Validate that a path exists and is a directory."""
+    if not isinstance(path, (str, Path)):
+        raise TypeError("path must be a string or Path object")
+
+    path = Path(path)
+    if not path.exists():
+        raise FileNotFoundError(f"Path does not exist: {path}")
+    if not path.is_dir():
+        raise NotADirectoryError(f"Path is not a directory: {path}")
+
+    
+def _validate_inputs_boxsize_minisize(boxsize, minisize):
+    """Validate boxsize and minize and raise appropriate errors."""
+    # Validate both are positive numbers
+    _validate_inputs_positive_number(boxsize, "boxsize")
+    _validate_inputs_positive_number(minisize, "minisize")
+
+    # Check that minisize is not larger than boxsize
+    if minisize > boxsize:
+        raise ValueError("minisize cannot be larger than boxsize")
+
+
+def _validate_inputs_mini_box_id(mini_box_id, cells_per_side):
+    """Validate mini-box ID and raise appropriate errors."""
+    # Check mini_box_id is a positive number
+
+    # Check mini_box_id is an integer
+    if not isinstance(mini_box_id, (int, numpy.integer)):
+        raise TypeError("mini_box_id must be an integer")
+    
+    if mini_box_id < 0:
+        raise ValueError("mini_box_id must be zero or positive")
+
+    # Check cells_per_side is a positive integer
+    if not isinstance(cells_per_side, (int, numpy.integer)):
+        raise TypeError("cells_per_side must be a positive integer")
+
+    if cells_per_side is None or cells_per_side <= 0:
+        raise ValueError("cells_per_side must be a positive integer")
+
+    # Validate mini_box_id is within valid range
+    total_mini_boxes = cells_per_side**3
+    if mini_box_id >= total_mini_boxes:
+        raise ValueError(
+            f"mini_box_id {mini_box_id} exceeds maximum valid ID {total_mini_boxes - 1} "
+            f"for grid with {cells_per_side}³ = {total_mini_boxes} mini-boxes"
+        )
+
+
+def _validate_inputs_box_partitioning(positions, velocities, uid, props):
+    """Validate function inputs and raise appropriate errors."""
+    # Check array shapes
+    _validate_inputs_coordinate_arrays(positions, "positions")
+    _validate_inputs_coordinate_arrays(velocities, "velocities")
+
+    if uid.ndim != 1:
+        raise ValueError("uid must be a 1D array")
+
+    n_particles = positions.shape[0]
+    if velocities.shape[0] != n_particles or uid.shape[0] != n_particles:
+        raise ValueError(
+            "positions, velocities, and uid must have the same length")
+
+    # Validate props structure if provided
+    if props is not None:
+        if not isinstance(props, tuple) or len(props) != 3:
+            raise ValueError(
+                "props must be a tuple of (arrays, labels, dtypes)")
+
+        arrays, labels, dtypes = props
+        if not (isinstance(arrays, (list, tuple)) and
+                isinstance(labels, (list, tuple)) and
+                isinstance(dtypes, (list, tuple))):
+            raise ValueError("props must contain three lists")
+
+        if not (len(arrays) == len(labels) == len(dtypes)):
+            raise ValueError("All lists in props must have the same length")
+
+        for i, arr in enumerate(arrays):
+            if not isinstance(arr, numpy.ndarray):
+                raise ValueError(f"props array {i} must be a numpy array")
+            if arr.shape[0] != n_particles:
+                raise ValueError(
+                    f"props array {i} must have {n_particles} elements")
+
+
+
+def _validate_inputs_load(
+    mini_box_id: int,
+    boxsize: float,
+    minisize: float,
+    load_path: str,
+    padding: float,
+) -> None:
+    """Validate inputs for load functions."""
+    # Validate mini_box_id
+    _validate_inputs_mini_box_id(mini_box_id, int(numpy.ceil(boxsize / minisize)))
+
+    # Validate boxsize and minisize
+    _validate_inputs_boxsize_minisize(boxsize, minisize)
+
+    # Validate load_path
+    _validate_inputs_existing_path(load_path)
+
+    # Validate padding
+    _validate_inputs_positive_number(padding, "padding")
+
+
 ###

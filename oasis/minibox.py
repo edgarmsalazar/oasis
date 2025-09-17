@@ -5,110 +5,21 @@ import h5py
 import numpy
 from tqdm import tqdm
 
-from oasis.common import ensure_dir_exists, get_min_unit_dtype
+from oasis.common import (_validate_inputs_boxsize_minisize,
+                          _validate_inputs_coordinate_arrays,
+                          _validate_inputs_load, ensure_dir_exists,
+                          _validate_inputs_mini_box_id,
+                          get_min_unit_dtype)
 from oasis.coordinates import relative_coordinates
 
+__all__ = [
+    'get_mini_box_id',
+    'get_adjacent_mini_box_ids',
+    'split_simulation_into_mini_boxes',
+    'load_particles',
+    'load_seeds',
+]
 
-def _validate_inputs_boxsize_minisize(boxsize, minisize):
-    """Validate function inputs and raise appropriate errors."""
-    if not isinstance(boxsize, (int, float)) or not isinstance(minisize, (int, float)):
-        raise TypeError("boxsize and minisize must be numeric")
-
-    # Check box parameters
-    if boxsize <= 0:
-        raise ValueError("boxsize must be positive")
-
-    if minisize <= 0:
-        raise ValueError("minisize must be positive")
-
-    if minisize > boxsize:
-        raise ValueError("minisize cannot be larger than boxsize")
-
-
-def _validate_inputs_box_partitioning(positions, velocities, uid, props):
-    """Validate function inputs and raise appropriate errors."""
-    # Check array shapes
-    if positions.ndim != 2 or positions.shape[1] != 3:
-        raise ValueError("positions must have shape (n_particles, 3)")
-
-    if velocities.ndim != 2 or velocities.shape[1] != 3:
-        raise ValueError("velocities must have shape (n_particles, 3)")
-
-    if uid.ndim != 1:
-        raise ValueError("uid must be a 1D array")
-
-    n_particles = positions.shape[0]
-    if velocities.shape[0] != n_particles or uid.shape[0] != n_particles:
-        raise ValueError(
-            "positions, velocities, and uid must have the same length")
-
-    # Validate props structure if provided
-    if props is not None:
-        if not isinstance(props, tuple) or len(props) != 3:
-            raise ValueError(
-                "props must be a tuple of (arrays, labels, dtypes)")
-
-        arrays, labels, dtypes = props
-        if not (isinstance(arrays, (list, tuple)) and
-                isinstance(labels, (list, tuple)) and
-                isinstance(dtypes, (list, tuple))):
-            raise ValueError("props must contain three lists")
-
-        if not (len(arrays) == len(labels) == len(dtypes)):
-            raise ValueError("All lists in props must have the same length")
-
-        for i, arr in enumerate(arrays):
-            if not isinstance(arr, numpy.ndarray):
-                raise ValueError(f"props array {i} must be a numpy array")
-            if arr.shape[0] != n_particles:
-                raise ValueError(
-                    f"props array {i} must have {n_particles} elements")
-
-
-def _validate_inputs_load(
-    mini_box_id: int,
-    boxsize: float,
-    minisize: float,
-    load_path: str,
-    padding: float,
-) -> None:
-    """Validate inputs for load functions."""
-    # Validate mini_box_id
-    if not isinstance(mini_box_id, (int, numpy.integer)):
-        raise TypeError("mini_box_id must be an integer")
-
-    _validate_inputs_boxsize_minisize(boxsize, minisize)
-
-    # Validate mini_box_id is within valid range
-    cells_per_side = int(numpy.ceil(boxsize / minisize))
-    total_mini_boxes = cells_per_side**3
-    if mini_box_id < 0:
-        raise ValueError(f"mini_box_id must be non-negative, got {mini_box_id}")
-    if mini_box_id >= total_mini_boxes:
-        raise ValueError(
-            f"mini_box_id {mini_box_id} exceeds maximum valid ID {total_mini_boxes - 1} "
-            f"for grid with {cells_per_side}³ = {total_mini_boxes} mini-boxes"
-        )
-    
-    mini_box_id = int(mini_box_id)
-    if mini_box_id < 0:
-        raise ValueError("mini_box_id must be non-negative")
-    
-    # Validate padding
-    if not isinstance(padding, (int, float, numpy.number)):
-        raise TypeError("padding must be numeric")
-    if padding < 0:
-        raise ValueError("padding must be non-negative")
-    
-    # Validate load_path
-    if not isinstance(load_path, (str, Path)):
-        raise TypeError("load_path must be a string or Path object")
-    
-    load_path = Path(load_path)
-    if not load_path.exists():
-        raise FileNotFoundError(f"Load path does not exist: {load_path}")
-    if not load_path.is_dir():
-        raise NotADirectoryError(f"Load path is not a directory: {load_path}")
 
 
 def get_mini_box_id(
@@ -172,24 +83,8 @@ def get_mini_box_id(
     EDGE_TOL = 1e-8
 
     # Input validation
-    if not isinstance(position, numpy.ndarray):
-        raise TypeError("position must be a numpy array")
-
+    _validate_inputs_coordinate_arrays(position, name="position")
     _validate_inputs_boxsize_minisize(boxsize, minisize)
-
-    # Handle input dimensions
-    if position.ndim == 1:
-        if position.size != 3:
-            raise ValueError("1D position array must have exactly 3 elements")
-        position = position.reshape(1, 3)
-        return_scalar = True
-    elif position.ndim == 2:
-        if position.shape[1] != 3:
-            raise ValueError("2D position array must have shape (N, 3)")
-        return_scalar = False
-    else:
-        raise ValueError(
-            "position array must be 1D (shape (3,)) or 2D (shape (N, 3))")
 
     # Validate coordinate bounds
     if numpy.any(position < 0) or numpy.any(position > boxsize):
@@ -221,10 +116,7 @@ def get_mini_box_id(
     ids = numpy.sum(shift * grid_indices, axis=1)
 
     # Return appropriate type based on input
-    if return_scalar:
-        return int(ids[0])
-    else:
-        return ids
+    return ids[0] if ids.shape[0] == 1 else ids
 
 
 def get_adjacent_mini_box_ids(
@@ -294,28 +186,14 @@ def get_adjacent_mini_box_ids(
     get_mini_box_id : Convert coordinates to mini-box ID
     """
     # Input validation
-    if not isinstance(mini_box_id, (int, numpy.integer)):
-        raise TypeError("mini_box_id must be an integer")
-
     _validate_inputs_boxsize_minisize(boxsize, minisize)
 
-    # Convert to Python int to avoid numpy scalar issues
-    mini_box_id = int(mini_box_id)
+    cells_per_side = int(numpy.ceil(boxsize / minisize))
+    _validate_inputs_mini_box_id(mini_box_id, cells_per_side)
 
     # Grid parameters
-    cells_per_side = int(numpy.ceil(boxsize / minisize))
     total_mini_boxes = cells_per_side**3
     max_id = total_mini_boxes - 1
-
-    # Validate mini_box_id range
-    if mini_box_id < 0:
-        raise ValueError(
-            f"mini_box_id must be non-negative, got {mini_box_id}")
-    if mini_box_id > max_id:
-        raise ValueError(
-            f"mini_box_id {mini_box_id} exceeds maximum valid ID {max_id} "
-            f"for grid with {cells_per_side}³ = {total_mini_boxes} mini-boxes"
-        )
 
     # Convert 1D ID to 3D grid coordinates (i, j, k)
     # Using the mapping: ID = k + j*cells_per_side + i*cells_per_side²
@@ -519,7 +397,6 @@ def split_simulation_into_mini_boxes(
         vel_chunk = velocities[low: upp]
         pid_chunk = uid[low: upp]
 
-        
         with h5py.File(save_dir + f'{mini_box_id}.hdf5', 'a') as hdf:
             if props:
                 props_chunks = [item[low: upp] for item in props]
@@ -546,13 +423,13 @@ def load_particles(
 ) -> Tuple[numpy.ndarray, numpy.ndarray, numpy.ndarray]:
     """
     Load particles from a mini box and its adjacent neighbors within padding distance.
-    
+
     This function loads particle data (positions, velocities, IDs) from a specified 
     mini box and all 26 neighboring mini boxes, then filters particles to only 
     include those within a specified padding distance from the target mini box edges.
     This is useful for analysis that requires particles near box boundaries to avoid
     edge effects.
-    
+
     Parameters
     ----------
     mini_box_id : int or numpy.integer
@@ -571,7 +448,7 @@ def load_particles(
         Maximum distance from mini box edges to include particles, in simulation 
         units. Particles further than this distance from any edge of the target
         mini box will be excluded. Must be non-negative. Default is 5.0.
-        
+
     Returns
     -------
     positions : numpy.ndarray
@@ -583,7 +460,7 @@ def load_particles(
     particle_ids : numpy.ndarray
         Particle IDs with shape (n_particles,) containing unique identifiers
         corresponding to the returned positions and velocities.
-        
+
     Raises
     ------
     TypeError
@@ -600,14 +477,14 @@ def load_particles(
         If HDF5 files cannot be read or are corrupted.
     RuntimeError
         If loaded data is inconsistent or if no particles are found.
-        
+
     Notes
     -----
     - Uses periodic boundary conditions when calculating relative coordinates
     - Loads from all 27 mini boxes (target + 26 neighbors) to ensure complete
       coverage within padding distance
     - Memory usage scales with the number of particles in the 27 mini boxes
-    
+
     Examples
     --------
     >>> positions, velocities, ids = load_particles(
@@ -618,13 +495,13 @@ def load_particles(
     ...     padding=2.0
     ... )
     >>> print(f"Loaded {len(positions)} particles")
-    
+
     >>> # Load without progress bars for batch processing
     >>> pos, vel, ids = load_particles(
     ...     mini_box_id=0, boxsize=50.0, minisize=5.0,
     ...     load_path="./mini_boxes/", padding=1.0,
     ... )
-        
+
     See Also
     --------
     get_mini_box_center : Get center coordinates of a mini box
@@ -637,14 +514,14 @@ def load_particles(
     # Determine number of partitions per side
     cells_per_side = int(numpy.ceil(boxsize / minisize))
 
-    # Calculate center coordinates. Grid cells start at (0,0,0) with size 
-    # minisize. Convert 1D ID to 3D grid coordinates (i, j, k). 
+    # Calculate center coordinates. Grid cells start at (0,0,0) with size
+    # minisize. Convert 1D ID to 3D grid coordinates (i, j, k).
     # Using the mapping: ID = k + j*cells_per_side + i*cells_per_side²
     i = mini_box_id // (cells_per_side**2)
     remainder = mini_box_id % (cells_per_side**2)
     j = remainder // cells_per_side
     k = remainder % cells_per_side
-    
+
     center = numpy.array([
         (k + 0.5) * minisize,
         (j + 0.5) * minisize,
@@ -689,7 +566,7 @@ def load_particles(
             f"No particles found within padding distance {padding} "
             f"of mini box {mini_box_id}"
         )
-    
+
     return positions[mask], velocities[mask], ids[mask]
 
 
@@ -702,7 +579,7 @@ def load_seeds(
 ) -> Tuple[numpy.ndarray]:
     """
     Load seeds from a mini box and its adjacent neighbors within padding distance.
-    
+
     This function loads seed data (positions, velocities, IDs, r200, m200, rs, mask) 
     from a specified mini box and all 26 neighboring mini boxes, then filters seeds 
     to only include those within a specified padding distance from the target 
@@ -756,7 +633,7 @@ def load_seeds(
     mini_box_mask : numpy.ndarray
         Boolean mask with shape (n_particles,) indicating which seeds are located
         in the target mini box (True) versus neighboring boxes (False).
-    
+
     Raises
     ------
     TypeError
@@ -787,14 +664,14 @@ def load_seeds(
     # Determine number of partitions per side
     cells_per_side = int(numpy.ceil(boxsize / minisize))
 
-    # Calculate center coordinates. Grid cells start at (0,0,0) with size 
-    # minisize. Convert 1D ID to 3D grid coordinates (i, j, k). 
+    # Calculate center coordinates. Grid cells start at (0,0,0) with size
+    # minisize. Convert 1D ID to 3D grid coordinates (i, j, k).
     # Using the mapping: ID = k + j*cells_per_side + i*cells_per_side²
     i = mini_box_id // (cells_per_side**2)
     remainder = mini_box_id % (cells_per_side**2)
     j = remainder // cells_per_side
     k = remainder % cells_per_side
-    
+
     center = numpy.array([
         (k + 0.5) * minisize,
         (j + 0.5) * minisize,
@@ -809,7 +686,8 @@ def load_seeds(
     )
 
     # Create empty lists (containers) to save the data from file for each ID
-    positions, velocities, ids, r200, m200, rs, mini_box_mask = ([] for _ in range(7))
+    positions, velocities, ids, r200, m200, rs, mini_box_mask = (
+        [] for _ in range(7))
 
     # Load all adjacent boxes
     for i, mini_box in enumerate(mini_box_ids):

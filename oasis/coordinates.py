@@ -1,5 +1,8 @@
 import numpy
 
+from oasis.common import (_validate_inputs_coordinate_arrays,
+                          _validate_inputs_positive_number)
+
 
 def relative_coordinates(
     positions: numpy.ndarray,
@@ -79,31 +82,15 @@ def relative_coordinates(
     [-L/2, L/2) in each dimension.
     """
     # Input validation and type conversion
-    try:
-        positions = numpy.asarray(positions, dtype=float)
-        reference = numpy.asarray(reference, dtype=float)
-    except (ValueError, TypeError) as e:
-        raise TypeError(f"Cannot convert inputs to numpy arrays: {e}")
+    _validate_inputs_coordinate_arrays(positions, "positions")
+    _validate_inputs_coordinate_arrays(reference, "reference")
 
     # Ensure positions is 2D array with shape (N, 3)
     if positions.ndim == 1:
         positions = positions.reshape(1, 3)
 
-    # Shape validation
-    if positions.ndim != 2 or positions.shape[1] != 3:
-        raise ValueError(
-            f"`positions` must have shape (N, 3) or (3,), got {positions.shape}.")
-
-    if reference.shape != (3,):
-        raise ValueError(
-            f"`reference` must have shape (3,), got {reference.shape}.")
-
     # Box size validation
-    if not numpy.isscalar(box_size):
-        raise ValueError("`box_size` must be a scalar value.")
-
-    if box_size <= 0:
-        raise ValueError(f"`box_size` must be positive, got {box_size}.")
+    _validate_inputs_positive_number(box_size, "box_size")
 
     # Compute displacement vectors
     displacement = positions - reference
@@ -198,27 +185,16 @@ def velocity_components(
     to zero and the tangential velocity equals the total velocity magnitude.
     """
     # Input validation and type conversion
-    try:
-        positions = numpy.asarray(positions, dtype=float)
-        velocities = numpy.asarray(velocities, dtype=float)
-    except (ValueError, TypeError) as e:
-        raise TypeError(f"Cannot convert inputs to numpy arrays: {e}")
+    _validate_inputs_coordinate_arrays(positions, "positions")
+    _validate_inputs_coordinate_arrays(velocities, "velocities")
 
     # Ensure positions and velocities are 2D arrays with shape (N, 3)
     if positions.ndim == 1:
         positions = positions.reshape(1, 3)
     if velocities.ndim == 1:
         velocities = velocities.reshape(1, 3)
-
-    # Shape validation
-    if positions.ndim != 2 or positions.shape[1] != 3:
-        raise ValueError(
-            f"`positions` must have shape (N, 3) or (3,), got {positions.shape}.")
-
-    if velocities.ndim != 2 or velocities.shape[1] != 3:
-        raise ValueError(
-            f"`velocities` must have shape (N, 3) or (3,), got {velocities.shape}.")
-
+    
+    # Check that positions and velocities have the same shape
     if positions.shape != velocities.shape:
         raise ValueError(f"`positions` and `velocities` must have the same shape, "
                          f"got {positions.shape} and {velocities.shape}.")
