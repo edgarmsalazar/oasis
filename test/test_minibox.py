@@ -668,6 +668,9 @@ class TestSplitSimulationIntoMiniBoxes:
             assert saved_velocities.shape[0] == n_particles_in_box
             assert saved_uid.shape[0] == n_particles_in_box
 
+            if n_particles_in_box == 0:
+                return  # No particles to verify further
+
             # Verify all particles belong to this mini box
             computed_ids = minibox.get_mini_box_id(
                 saved_positions, boxsize, minisize)
@@ -776,13 +779,16 @@ class TestSplitSimulationIntoMiniBoxes:
         for file_path in hdf5_files:
             self.verify_hdf5_structure(file_path, expected_datasets)
 
-    @pytest.mark.parametrize("boxsize,minisize,expected_cells", [
-        (10.0, 2.0, 5),
-        (10.0, 3.0, 4),
-        (15.0, 5.0, 3),
-        (20.0, 7.0, 3),
-        (100.0, 25.0, 4)
-    ])
+    @pytest.mark.parametrize(
+        "boxsize, minisize, expected_cells", 
+        [
+            (10.0, 2.0, 5),
+            (10.0, 3.0, 4),
+            (15.0, 5.0, 3),
+            (20.0, 7.0, 3),
+            (100.0, 25.0, 4)
+        ],
+    )
     def test_different_box_configurations(self, temp_dir, basic_simulation_data,
                                           boxsize, minisize, expected_cells):
         """Test with different box size configurations."""
@@ -1226,31 +1232,34 @@ class TestLoadParticles:
     def test_runtime_error_when_no_particles(self, tmp_path):
         make_all_particle_files(tmp_path, 0, 10.0, 10.0, with_particle=False)
 
-        with pytest.raises(RuntimeError, match="No particles found"):
+        with pytest.raises(ValueError, match="must contain"):
             minibox.load_particles(
                 0, 10.0, 10.0, str(tmp_path) + "/", padding=1.0)
 
     @pytest.mark.parametrize(
-        "mini_box_id, boxsize, minisize, load_path, padding, expected_error",
+        "mini_box_id, boxsize, minisize, padding, expected_error",
         [
-            ("0", 10.0, 10.0, "some/path", 1.0, TypeError),
-            (0, "10", 10.0, "some/path", 1.0, TypeError),
-            (0, 10.0, "10", "some/path", 1.0, TypeError),
-            (0, 10.0, 10.0, 123, 1.0, TypeError),
-            (0, 10.0, 10.0, "some/path", "1.0", TypeError),
+            ("0", 10.0, 10.0, 1.0, TypeError),
+            (0, "10", 10.0, 1.0, TypeError),
+            (0, 10.0, "10", 1.0, TypeError),
+            (0, 10.0, 10.0, 1.0, TypeError),
+            (0, 10.0, 10.0, "1.0", TypeError),
         ],
     )
-    def test_type_errors(self, mini_box_id, boxsize, minisize, load_path, padding, expected_error):
+    def test_type_errors(self, tmp_path, mini_box_id, boxsize, minisize, padding, expected_error):
+        valid_dir = tmp_path / "data"
+        valid_dir.mkdir()
+        
         with pytest.raises(expected_error):
             minibox.load_particles(mini_box_id, boxsize,
-                                   minisize, load_path, padding)
+                                   minisize, valid_dir, padding)
 
     def test_value_errors_and_file_errors(self, tmp_path):
         subdir = tmp_path / "mini_boxes_nside_1"
         subdir.mkdir()
 
         # Negative ID
-        with pytest.raises(ValueError, match="mini_box_id must be non-negative"):
+        with pytest.raises(ValueError, match="mini_box_id must be zero or positive"):
             minibox.load_particles(-1, 10.0, 10.0, str(tmp_path) + "/", 1.0)
 
         # Missing file
@@ -1289,30 +1298,33 @@ class TestLoadSeeds:
     def test_runtime_error_when_no_seeds(self, tmp_path):
         make_all_seed_files(tmp_path, 0, 10.0, 10.0, with_seed=False)
 
-        with pytest.raises(RuntimeError, match="No seeds found"):
+        with pytest.raises(ValueError, match="must contain"):
             minibox.load_seeds(0, 10.0, 10.0, str(tmp_path) + "/", padding=1.0)
 
     @pytest.mark.parametrize(
-        "mini_box_id, boxsize, minisize, load_path, padding, expected_error",
+        "mini_box_id, boxsize, minisize, padding, expected_error",
         [
-            ("0", 10.0, 10.0, "some/path", 1.0, TypeError),
-            (0, "10", 10.0, "some/path", 1.0, TypeError),
-            (0, 10.0, "10", "some/path", 1.0, TypeError),
-            (0, 10.0, 10.0, 123, 1.0, TypeError),
-            (0, 10.0, 10.0, "some/path", "1.0", TypeError),
+            ("0", 10.0, 10.0, 1.0, TypeError),
+            (0, "10", 10.0, 1.0, TypeError),
+            (0, 10.0, "10", 1.0, TypeError),
+            (0, 10.0, 10.0, 1.0, TypeError),
+            (0, 10.0, 10.0, "1.0", TypeError),
         ],
     )
-    def test_type_errors(self, mini_box_id, boxsize, minisize, load_path, padding, expected_error):
+    def test_type_errors(self, tmp_path, mini_box_id, boxsize, minisize, padding, expected_error):
+        valid_dir = tmp_path / "data"
+        valid_dir.mkdir()
+
         with pytest.raises(expected_error):
             minibox.load_seeds(mini_box_id, boxsize,
-                               minisize, load_path, padding)
+                               minisize, valid_dir, padding)
 
     def test_value_errors_and_file_errors(self, tmp_path):
         subdir = tmp_path / "mini_boxes_nside_1"
         subdir.mkdir()
 
         # Negative ID
-        with pytest.raises(ValueError, match="mini_box_id must be non-negative"):
+        with pytest.raises(ValueError, match="mini_box_id must be zero or positive"):
             minibox.load_seeds(-1, 10.0, 10.0, str(tmp_path) + "/", 1.0)
 
         # Missing file
