@@ -91,8 +91,6 @@ class TestRelativeCoordinates:
             # negative box size
             (numpy.zeros((1, 3)), numpy.zeros(3), -1.0),
 
-            # non-scalar box size
-            (numpy.zeros((1, 3)), numpy.zeros(3), [1.0, 2.0]),
         ],
     )
     def test_value_errors(self, positions, reference, boxsize):
@@ -100,10 +98,18 @@ class TestRelativeCoordinates:
         with pytest.raises(ValueError):
             coordinates.relative_coordinates(positions, reference, boxsize)
 
-    def test_type_error(self):
+    @pytest.mark.parametrize(
+        "positions, reference, boxsize",
+        [   
+            ("bad-input", numpy.zeros(3), 1.0),
+            # non-scalar box size
+            (numpy.zeros((1, 3)), numpy.zeros(3), [1.0, 2.0]),
+        ],
+    )
+    def test_type_error(self, positions, reference, boxsize):
         """Non-numpy-convertible inputs should raise TypeError."""
         with pytest.raises(TypeError):
-            coordinates.relative_coordinates("bad-input", numpy.zeros(3), 1.0)
+            coordinates.relative_coordinates(positions, reference, boxsize)
 
 
 class TestVelocityComponents:
