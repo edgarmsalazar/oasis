@@ -5,9 +5,10 @@ from multiprocessing import Pool
 import h5py as h5
 import numpy as np
 from scipy.optimize import curve_fit, minimize
+from scipy.ndimage import gaussian_filter1d
 from tqdm import tqdm
 
-from oasis.common import G_gravity
+from oasis.common import G_GRAVITY
 from oasis.coordinates import relative_coordinates, velocity_components
 from oasis.minibox import get_mini_box_id, load_particles
 
@@ -80,7 +81,7 @@ def _get_candidate_particle_data(
         m200m = mass_prof[rho200_loc]
 
         # Compute V200
-        v200sq = G_gravity * m200m / r200m
+        v200sq = G_GRAVITY * m200m / r200m
         
         # Append rescaled quantities to containers
         r.append(rps/r200m)
@@ -337,10 +338,12 @@ def cost_perp_distance(b: float, *data) -> float:
 def gradient_minima(
     r: np.ndarray,
     lnv2: np.ndarray,
-    mask_vr: np.ndarray,
     n_points: int,
     r_min: float,
     r_max: float,
+    n_bins: int = 100,
+    sigma_smooth: float = 2.0,
+    diagnostics: bool = False,
 ) -> tuple[np.ndarray]:
     """Computes the r-lnv2 gradient and finds the minimum as a function of `r`
     within the interval `[r_min, r_max]`
@@ -365,18 +368,47 @@ def gradient_minima(
     tuple[np.ndarray]
         Radial and minima coordinates.
     """
-    r_edges_grad = np.linspace(r_min, r_max, n_points + 1)
-    grad_r = 0.5 * (r_edges_grad[:-1] + r_edges_grad[1:])
-    grad_min = np.zeros(n_points)
-    for i in range(n_points):
-        r_mask = (r > r_edges_grad[i]) * (r < r_edges_grad[i + 1])
-        hist_yv, hist_edges = np.histogram(lnv2[mask_vr * r_mask], bins=200)
-        hist_lnv2 = 0.5 * (hist_edges[:-1] + hist_edges[1:])
-        hist_lnv2_grad = np.gradient(hist_yv, np.mean(np.diff(hist_edges)))
-        lnv2_mask = (1.0 < hist_lnv2) * (hist_lnv2 < 2.0)
-        grad_min[i] = hist_lnv2[lnv2_mask][np.argmin(hist_lnv2_grad[lnv2_mask])]
+    r_edges = np.linspace(r_min, r_max, n_points + 1)
+    counts_gradient_minima = np.zeros(n_points)
 
-    return grad_r, grad_min
+    lnv2_bins_out = np.zeros((n_points, n_bins))
+    counts_out = np.zeros((n_points, n_bins))
+    counts_gradient_out = np.zeros((n_points, n_bins))
+    counts_gradient_smooth_out = np.zeros((n_points, n_bins))
+    
+    for i in range(n_points):
+        # Create mask for current r bin
+        r_mask = (r > r_edges[i]) * (r < r_edges[i + 1])
+
+        # Compute histogram of lnv2 values within the r bin and the vr mask
+        counts, lnv2_edges = np.histogram(lnv2[r_mask], bins=n_bins)
+        
+        # Compute the gradient of the histogram
+        counts_gradient = np.gradient(counts, np.mean(np.diff(lnv2_edges)))
+        counts_gradient /= np.max(np.abs(counts_gradient))
+        
+        # Smooth the gradient
+        counts_gradient_smooth = gaussian_filter1d(counts_gradient, sigma_smooth)
+        
+        # Find the lnv2 value corresponding to the minimum of the smoothed gradient
+        lnv2_bins = 0.5 * (lnv2_edges[:-1] + lnv2_edges[1:])
+        counts_gradient_minima[i] = lnv2_bins[np.argmin(counts_gradient_smooth)]
+
+        # Store diagnostics
+        lnv2_bins_out[i, :] = lnv2_bins
+        counts_out[i, :] = counts / np.max(counts)
+        counts_gradient_out[i, :] = counts_gradient
+        counts_gradient_smooth_out[i, :] = counts_gradient_smooth
+    
+    # Compute r bin centres
+    r_bins = 0.5 * (r_edges[:-1] + r_edges[1:])
+
+    # Return diagnostics if requested
+    if diagnostics:
+        return r_bins, counts_gradient_minima, \
+            (lnv2_bins_out, counts_out, counts_gradient_out, counts_gradient_smooth_out)
+    else:
+        return r_bins, counts_gradient_minima
 
 
 def self_calibration(
@@ -445,7 +477,7 @@ def self_calibration(
     x0 = 0.5
 
     # For vr > 0 ===============================================================
-    r_grad, min_grad = gradient_minima(r, lnv2, mask_vr_pos, n_points, 
+    r_grad, min_grad = gradient_minima(r[mask_vr_pos], lnv2[mask_vr_pos], n_points, 
                                        *grad_lims)
     # Find slope by fitting to the minima.
     popt, _ = curve_fit(lambda x, m, b: m * (x - x0) + b, r_grad, min_grad, 
@@ -464,7 +496,7 @@ def self_calibration(
     b_pivot_pos = res.x[0]
 
     # For vr < 0 ===============================================================
-    r_grad, min_grad = gradient_minima(r, lnv2, mask_vr_neg, n_points, 
+    r_grad, min_grad = gradient_minima(r[mask_vr_neg], lnv2[mask_vr_neg], n_points, 
                                        *grad_lims)
     # Find slope by fitting to the minima.
     popt, _ = curve_fit(lambda x, m, b: m * (x - x0) + b, r_grad, min_grad, 
