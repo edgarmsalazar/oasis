@@ -249,7 +249,8 @@ def _validate_inputs_coordinate_arrays(arr, name):
     if arr.shape[0] == 0:
         raise ValueError(f"Input {name} must contain at least one particle")
 
-    if (arr.ndim == 1 and arr.shape[0] != 3) or (arr.ndim == 2 and arr.shape[1] != 3):
+    if (arr.ndim == 1 and arr.shape[0] != 3) or (arr.ndim == 2 and arr.shape[1] != 3) or \
+        len(arr.shape) > 2:
         raise ValueError(f"Input {name} must have shape (3,) or (n_particles, 3)")
     
 
