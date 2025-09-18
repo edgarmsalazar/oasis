@@ -1,15 +1,17 @@
 import os
 from functools import partial
 from multiprocessing import Pool
+from typing import Tuple
 
-import h5py as h5
-import numpy as np
+import h5py
+import numpy
 from scipy.ndimage import gaussian_filter1d
 from scipy.optimize import curve_fit, minimize
 from tqdm import tqdm
 
 from oasis.common import (G_GRAVITY, _validate_inputs_boxsize_minisize,
                           _validate_inputs_coordinate_arrays,
+                          _validate_inputs_existing_path,
                           _validate_inputs_mini_box_id,
                           _validate_inputs_positive_number)
 from oasis.coordinates import relative_coordinates, velocity_components
@@ -21,110 +23,293 @@ __all__ = [
     'calibrate',
 ]
 
+
+def _compute_r200m_and_v200m(
+    radial_distances: numpy.ndarray, 
+    particle_mass: float, 
+    mass_density: float
+) -> Tuple[float, float]:
+    """Compute virial radius R200m and circular velocity V200 for a halo.
+    
+    This function calculates the virial properties of a halo by analyzing the
+    radial density profile. R200m is defined as the radius at which the mean
+    enclosed density equals 200 times the mean matter density of the universe.
+    V200 is the corresponding circular velocity at R200m.
+
+    Parameters
+    ----------
+    radial_distances : numpy.ndarray
+        Array of radial distances from the halo center with shape (N,).
+        Values must be non-negative and in simulation units (typically Mpc).
+    particle_mass : float
+        Mass of each simulation particle in simulation units (typically M_sun).
+        Must be positive.
+    mass_density : float
+        Mean matter density of the universe in simulation units
+        (typically M_sun/Mpc^3). Must be positive.
+        
+    Returns
+    -------
+    r200m : float
+        Virial radius R200m in simulation units. Returns 0.0 if computation fails.
+    v200_squared : float
+        Square of circular velocity V200² in (simulation_units)². Returns 0.0
+        if computation fails.
+        
+    Raises
+    ------
+    TypeError
+        If radial_distances cannot be converted to numpy array.
+    ValueError
+        If particle_mass or mass_density are not positive scalars, or if 
+        radial_distances contains negative values.
+    RuntimeError
+        If density profile computation encounters numerical issues.
+
+    Notes
+    -----
+    - The algorithm sorts particles by radius and computes cumulative mass profile
+    - Density is computed as ρ(r) = M(<r) / (4π/3 × r³)  
+    - R200m corresponds to the largest radius where ρ(r) ≥ 200×ρ_m
+    - If no radius satisfies the criterion, uses the outermost particle
+    - V200² = GM200m/R200m where G is the gravitational constant
+
+    Examples
+    --------
+    >>> import numpy
+    >>> distances = numpy.array([0.1, 0.2, 0.3, 0.5, 0.8, 1.2])
+    >>> r200m, v200_sq = _compute_r200m_and_v200(distances, 1e10, 2.78e11)
+    >>> print(f"R200m = {r200m:.3f} Mpc, V200 = {numpy.sqrt(v200_sq):.1f} km/s")
+    
+    >>> # Handle edge case with no particles
+    >>> r200m, v200_sq = _compute_r200m_and_v200(numpy.array([]), 1e10, 2.78e11)
+    >>> print(f"Empty input: R200m = {r200m}, V200² = {v200_sq}")
+    Empty input: R200m = 0.0, V200² = 0.0
+        
+    See Also
+    --------
+    G_GRAVITY : Gravitational constant used in V200 computation
+    """
+    # Input validation
+    _validate_inputs_coordinate_arrays(radial_distances, 'radial_distances')
+    _validate_inputs_positive_number(particle_mass, 'particle_mass')
+    _validate_inputs_positive_number(mass_density, 'mass_density')
+    
+    # Sort distances for cumulative mass profile
+    sorted_distances = numpy.sort(radial_distances)
+    n_particles = len(sorted_distances)
+    
+    # Avoid division by zero for particles at the center
+    # Replace zero distances with a small value
+    min_distance = numpy.finfo(float).eps
+    sorted_distances = numpy.maximum(sorted_distances, min_distance)
+    
+    # Compute cumulative mass profile
+    mass_profile = particle_mass * numpy.arange(1, n_particles + 1)
+    
+    # Compute volume-averaged densities
+    volumes = (4.0 / 3.0) * numpy.pi * sorted_distances**3
+    densities = mass_profile / volumes
+    
+    # Find where density drops below 200 * mass_density
+    target_density = 200.0 * mass_density
+    mask_above_target = densities >= target_density
+    
+    if not numpy.any(mask_above_target):
+        # If no particles satisfy criterion, use outermost particle
+        r200m = sorted_distances[-1]
+        m200m = mass_profile[-1]
+    else:
+        # Use last particle that satisfies the density criterion
+        last_valid_idx = numpy.where(mask_above_target)[0][-1]
+        r200m = sorted_distances[last_valid_idx]
+        m200m = mass_profile[last_valid_idx]
+    
+    # Compute V200² with safety check
+    if r200m > 0 and m200m > 0:
+        v200_squared = G_GRAVITY * m200m / r200m
+        if not numpy.isfinite(v200_squared) or v200_squared <= 0:
+            v200_squared = 0.0
+    else:
+        v200_squared = 0.0
+        
+    return float(r200m), float(v200_squared)
+
+
 def _get_candidate_particle_data(
     mini_box_id: int,
-    position_seeds: np.ndarray,
-    velocity_seeds: np.ndarray,
+    position_seeds: numpy.ndarray,
+    velocity_seeds: numpy.ndarray,
     r_max: float,
     boxsize: float,
     minisize: float,
     save_path: str,
-    part_mass: float,
+    particle_mass: float,
     mass_density: float,
-) -> np.ndarray:
-    """Extracts all requested seeds from a single minibox.
+) -> numpy.ndarray:
+    """Extract and process particle data for all seeds within a single minibox.
+
+    This function loads particles from a specified minibox and its neighbors, then
+    processes each seed to compute scaled radial distances, radial velocities, and
+    velocity magnitudes in units of the virial properties (R200m, V200).
+
+    The function performs the following steps for each seed:
+    1. Loads particles within r_max of the seed position
+    2. Computes relative positions and velocities 
+    3. Calculates R200m and V200 from the density profile
+    4. Scales all quantities by the virial properties
 
     Parameters
     ----------
     mini_box_id : int
-        Mini-box ID
-    position_seeds : np.ndarray
-        Seed positions
-    velocity_seeds : np.ndarray
-        Seed velocities
+        ID of the minibox containing the seeds. Must be a valid minibox ID
+        for the given box configuration.
+    pos_seed : np.ndarray
+        Seed positions with shape (n_seeds, 3). Each row contains the 
+        (x, y, z) coordinates of a seed in simulation units.
+    vel_seed : np.ndarray
+        Seed velocities with shape (n_seeds, 3). Each row contains the
+        (vx, vy, vz) velocity components of a seed in simulation units.
     r_max : float
-        Maximum distance to consider
+        Maximum distance from seed centers to consider particles, in 
+        simulation units. Must be positive.
     boxsize : float
-        Size of simulation box
+        Size of the cubic simulation box in simulation units. Must be positive.
     minisize : float
-        Size of mini box
+        Size of each cubic minibox in simulation units. Must be positive
+        and typically smaller than boxsize.
     save_path : str
-        Path to the mini boxes
-    part_mass : float
-        Mass per particle
-    rhom : float
-        Mass density of the universe
+        Path to directory containing minibox HDF5 files. Must be a valid
+        directory path with the expected minibox file structure.
+    particle_mass : float
+        Mass of each simulation particle in simulation units (typically M_sun).
+        Must be positive.
+    mass_density : float
+        Mean matter density of the universe in simulation units 
+        (typically M_sun/Mpc^3). Must be positive.
 
     Returns
     -------
     np.ndarray
-        Particle's radial distance, radial velocity and log of the square of the
-        velocity in units of R200m and M200m.
+        Particle data array with shape (n_particles, 3) where each row contains:
+        - Column 0: r/R200m - Radial distance scaled by R200m
+        - Column 1: vr/V200 - Radial velocity scaled by V200  
+        - Column 2: ln(v²/V200²) - Natural log of velocity squared scaled by V200²
+        
+        If no valid particles are found, returns empty array with shape (0, 3).
+
+    Raises
+    ------
+    TypeError
+        If mini_box_id is not an integer, or if array inputs cannot be
+        converted to numpy arrays.
+    ValueError
+        If mini_box_id is negative, array shapes are incompatible, or
+        if any scalar parameters are non-positive.
+    FileNotFoundError
+        If save_path doesn't exist or required minibox files are missing.
+    OSError
+        If minibox HDF5 files cannot be read or are corrupted.
+    RuntimeError
+        If particle loading fails or density profile computation encounters
+        numerical issues.
+
+    Notes
+    -----
+    - Uses periodic boundary conditions when computing relative coordinates
+    - R200m is defined as the radius where mean enclosed density equals 200×ρ_m
+    - V200 = √(GM200m/R200m) where M200m is the mass within R200m
+    - Seeds with insufficient particles or invalid virial properties are skipped
+    - Memory usage scales with the number of particles within r_max of all seeds
+
+    Examples
+    --------
+    >>> # Process seeds in minibox 42
+    >>> pos_seeds = np.array([[10.0, 15.0, 20.0], [25.0, 30.0, 35.0]])
+    >>> vel_seeds = np.array([[100.0, 50.0, -75.0], [-80.0, 120.0, 90.0]])
+    >>> data = _get_candidate_particle_data(
+    ...     mini_box_id=42,
+    ...     pos_seed=pos_seeds, 
+    ...     vel_seed=vel_seeds,
+    ...     r_max=5.0,
+    ...     boxsize=100.0,
+    ...     minisize=10.0,
+    ...     save_path="/data/miniboxes/",
+    ...     part_mass=1e10,
+    ...     rhom=2.78e11
+    ... )
+    >>> print(f"Processed {len(data)} particles from {len(pos_seeds)} seeds")
+
+    See Also
+    --------
+    _compute_r200m_and_v200 : Computes virial radius and velocity
+    load_particles : Loads particles from minibox files
+    velocity_components : Decomposes velocities into radial/tangential components
     """
     # Validate inputs
     _validate_inputs_mini_box_id(mini_box_id)
     _validate_inputs_coordinate_arrays(position_seeds, 'seed positions')
     _validate_inputs_coordinate_arrays(velocity_seeds, 'seed velocities')
+    _validate_inputs_existing_path(save_path)
     _validate_inputs_boxsize_minisize(boxsize, minisize)
     _validate_inputs_positive_number(r_max, 'r_max')
-    _validate_inputs_positive_number(part_mass, 'part_mass')
+    _validate_inputs_positive_number(particle_mass, 'particle_mass')
     _validate_inputs_positive_number(mass_density, 'rhom')
 
     # Load particles in minibox.
-    position_particles, velocity_particles, *_ = \
+    position_particles, velocity_particles, _ = \
         load_particles(mini_box_id, boxsize, minisize, save_path)
 
     # Iterate over seeds in current mini box.
     radius, radial_velocity, log_velocity_sq = ([] for _ in range(3))
-    for i in range(len(position_seeds)):
-        # Compute the relative positions of all particles in the box
-        rel_pos = relative_coordinates(position_particles, position_seeds[i], boxsize)
-        # Only work with those close to the seed
-        mask_close = np.prod(np.abs(rel_pos) <= r_max, axis=1, dtype=bool)
+    for position_seed_i, velocity_seed_i in zip(position_seeds, velocity_seeds):
+        # Find particles within r_max of the seed
+        relative_position = relative_coordinates(position_particles, position_seed_i, boxsize)
+        mask_close = numpy.prod(numpy.abs(relative_position) <= r_max, axis=1, dtype=bool)
 
-        rel_pos = rel_pos[mask_close]
-        rel_vel = velocity_particles[mask_close] - velocity_seeds[i]
+        # Apply mask
+        relative_position = relative_position[mask_close]
+        relative_velocity = velocity_particles[mask_close] - velocity_seed_i
         
-        # Compute radial distance, radial and tangential velocities
-        rps = np.sqrt(np.sum(np.square(rel_pos), axis=1))
-        vrp, _, v2p = velocity_components(rel_pos, rel_vel)
+        # Compute radial distance (L2 norm). No need to further filter by r_max
+        # since we already applied a cubic mask.
+        rps = numpy.linalg.norm(relative_position, axis=1)
+
+        # Compute velocity components
+        vrp, _, v2p = velocity_components(relative_position, relative_velocity)
 
         # Compute R200m and M200m
-        rps_prof = rps[np.argsort(rps)]
-        mass_prof = part_mass * np.arange(1, len(rps_prof)+1)
-        # Find \rho(r) = 200*\rhom
-        rho200_loc = np.argmax(mass_prof / (4 / 3 * np.pi * rps_prof ** 3) \
-                               <= 200 * mass_density)
-        r200m = rps_prof[rho200_loc]
-        m200m = mass_prof[rho200_loc]
-
-        # Compute V200
-        v200sq = G_GRAVITY * m200m / r200m
+        r200m, v200m_sq = _compute_r200m_and_v200m(rps, particle_mass, mass_density)
         
         # Append rescaled quantities to containers
-        radius.append(rps/r200m)
-        radial_velocity.append(vrp/np.sqrt(v200sq))
-        log_velocity_sq.append(np.log(v2p/v200sq))
-    
-    # Concatenate into a single array
-    radius = np.concatenate(radius)
-    radial_velocity = np.concatenate(radial_velocity)
-    log_velocity_sq = np.concatenate(log_velocity_sq)
+        radius.append(rps / r200m)
+        radial_velocity.append(vrp / numpy.sqrt(v200m_sq))
 
-    return np.vstack([radius, radial_velocity, log_velocity_sq])
+        # Prevent log(0) or log(negative) by setting minimum value
+        v_sq_ratio = v2p / v200m_sq
+        v_sq_ratio = numpy.maximum(v_sq_ratio, 1e-10)
+
+        log_velocity_sq.append(numpy.log(v_sq_ratio))
+    
+    # Concatenate arrays
+    radius = numpy.concatenate(radius)
+    radial_velocity = numpy.concatenate(radial_velocity)
+    log_velocity_sq = numpy.concatenate(log_velocity_sq)
+
+    return numpy.vstack([radius, radial_velocity, log_velocity_sq])
 
 
 def _select_candidate_seeds(
     n_seeds: int,
-    seed_data: tuple[np.ndarray],
+    seed_data: Tuple[numpy.ndarray],
     r_max: float,
     boxsize: float,
     minisize: float,
     save_path: str,
-    part_mass: float,
-    rhom: float,
+    particle_mass: float,
+    mass_density: float,
     n_threads: int = None,
-) -> tuple[np.ndarray]:
+) -> tuple[numpy.ndarray]:
     """Locates for the largest `M_200b` seeds and searches for all the particles
     around them up to a distance `r_max`.
 
@@ -136,7 +321,7 @@ def _select_candidate_seeds(
     ----------
     n_seeds : int
         Number of seeds to process
-    seed_data : tuple[np.ndarray]
+    seed_data : tuple[numpy.ndarray]
         Tuple with seed ID, positions, velocities, M200b and R200b.
     r_max : float
         Maximum distance to consider
@@ -146,14 +331,14 @@ def _select_candidate_seeds(
         Size of mini box
     save_path : str
         Path to the mini boxes
-    part_mass : float
+    particle_mass : float
         Mass per particle
     rhom : float
         Mass density of the universe
 
     Returns
     -------
-    np.ndarray
+    numpy.ndarray
         Radial distance, radial velocity, and log of the square of the velocity 
         in units of R200m and M200m.
     """
@@ -161,7 +346,7 @@ def _select_candidate_seeds(
     hid, pos_seed, vel_seed, m200b, r200b  = seed_data
 
     # Rank order by mass.
-    order = np.argsort(-m200b)
+    order = numpy.argsort(-m200b)
     hid = hid[order]
     pos_seed = pos_seed[order]
     vel_seed = vel_seed[order]
@@ -183,10 +368,10 @@ def _select_candidate_seeds(
         if i >= len(hid)-1: 
             print(f'Only found {i}/{n_seeds} seeds.')
             break
-        mask_close = np.prod(np.abs(pos_seed - pos_seed[i]) <=  2.*r200b[i],
+        mask_close = numpy.prod(numpy.abs(pos_seed - pos_seed[i]) <=  2.*r200b[i],
                              axis=1, dtype=bool)
         mask_self = m200b != m200b[i]
-        if np.all(m200b[mask_close & mask_self] < (0.2 * m200b[i])):
+        if numpy.all(m200b[mask_close & mask_self] < (0.2 * m200b[i])):
             seed_i.append(i)
         i += 1
     # print(f'Found candidate seeds.')
@@ -198,14 +383,14 @@ def _select_candidate_seeds(
     # Locate mini box IDs for all seeds.
     seed_mini_box_id = get_mini_box_id(pos_seed, boxsize, minisize)
     # Sort by mini box ID
-    order = np.argsort(seed_mini_box_id)
+    order = numpy.argsort(seed_mini_box_id)
     seed_mini_box_id = seed_mini_box_id[order]
     hid = hid[order]
     pos_seed = pos_seed[order]
     vel_seed = vel_seed[order]
 
     # Get unique mini box ids
-    unique_mini_box_ids = np.unique(seed_mini_box_id)
+    unique_mini_box_ids = numpy.unique(seed_mini_box_id)
     n_unique = len(unique_mini_box_ids)
 
     pos_unique = [
@@ -218,14 +403,14 @@ def _select_candidate_seeds(
     ]
 
     func = partial(_get_candidate_particle_data, r_max=r_max, boxsize=boxsize, 
-                   minisize=minisize, save_path=save_path, part_mass=part_mass, 
-                   rhom=rhom)
+                   minisize=minisize, save_path=save_path, particle_mass=particle_mass, 
+                   rhom=mass_density)
     
     # Cap the number of threads to the total number of miniboxes to process.
     if not n_threads:
-        n_threads = np.min([os.cpu_count()-10, n_unique])
+        n_threads = numpy.min([os.cpu_count()-10, n_unique])
     else:
-        n_threads = np.min([n_threads, n_unique])
+        n_threads = numpy.min([n_threads, n_unique])
 
     data = zip(unique_mini_box_ids, pos_unique, vel_unique)
     out = []
@@ -237,7 +422,7 @@ def _select_candidate_seeds(
             out.append(res)
             pbar.update()
             pbar.refresh()
-    out = np.concatenate(out, axis=1).T
+    out = numpy.concatenate(out, axis=1).T
 
     # Return an array where each column corresponds to r, vr, lnv2 respectively
     return out
@@ -245,22 +430,22 @@ def _select_candidate_seeds(
 
 def get_calibration_data(
     n_seeds: int,
-    seed_data: tuple[np.ndarray],
+    seed_data: Tuple[numpy.ndarray],
     r_max: float,
     boxsize: float,
     minisize: float,
     save_path: str,
-    part_mass: float,
-    rhom: float,
+    particle_mass: float,
+    mass_density: float,
     n_threads: int = None,
-) -> tuple[np.ndarray]:
+) -> Tuple[numpy.ndarray]:
     """_summary_
 
     Parameters
     ----------
     n_seeds : int
         Number of seeds to process
-    seed_data : tuple[np.ndarray]
+    seed_data : tuple[numpy.ndarray]
         Tuple with seed ID, positions, velocities, M200b and R200b.
     r_max : float
         Maximum distance to consider
@@ -270,7 +455,7 @@ def get_calibration_data(
         Size of mini box
     save_path : str
         Path to the mini boxes
-    part_mass : float
+    particle_mass : float
         Mass per particle
     rhom : float
         Mass density of the universe
@@ -279,12 +464,12 @@ def get_calibration_data(
 
     Returns
     -------
-    tuple[np.ndarray]
+    tuple[numpy.ndarray]
         Radial distance, radial velocity, and log of the square of the velocity
     """
     file_name = save_path + 'calibration_data.hdf5'
     try:
-        with h5.File(file_name, 'r') as hdf:
+        with h5py.File(file_name, 'r') as hdf:
             r = hdf['r'][()]
             vr = hdf['vr'][()]
             lnv2 = hdf['lnv2'][()]
@@ -297,12 +482,12 @@ def get_calibration_data(
             boxsize=boxsize,
             minisize=minisize,
             save_path=save_path,
-            part_mass=part_mass,
-            rhom=rhom,
+            particle_mass=particle_mass,
+            mass_density=mass_density,
             n_threads=n_threads,
         )
 
-        with h5.File(file_name, 'w') as hdf:
+        with h5py.File(file_name, 'w') as hdf:
             hdf.create_dataset('r', data=out[:, 0])
             hdf.create_dataset('vr', data=out[:, 1])
             hdf.create_dataset('lnv2', data=out[:, 2])
@@ -330,7 +515,7 @@ def cost_percentile(b: float, *data) -> float:
     r, lnv2, slope, target, r0 = data
     line = slope * (r - r0) + b
     below_line = (lnv2 < line).sum()
-    return np.log((target - below_line / r.shape[0]) ** 2)
+    return numpy.log((target - below_line / r.shape[0]) ** 2)
 
 
 def cost_perp_distance(b: float, *data) -> float:
@@ -351,30 +536,30 @@ def cost_perp_distance(b: float, *data) -> float:
     """
     r, lnv2, slope, width, r0 = data
     line = slope * (r - r0) + b
-    d = np.abs(lnv2 - line) / np.sqrt(1 + slope**2)
-    return -np.log(np.mean(d[(d < width)] ** 2))
+    d = numpy.abs(lnv2 - line) / numpy.sqrt(1 + slope**2)
+    return -numpy.log(numpy.mean(d[(d < width)] ** 2))
 
 
 def gradient_minima(
-    r: np.ndarray,
-    lnv2: np.ndarray,
+    r: numpy.ndarray,
+    lnv2: numpy.ndarray,
     n_points: int,
     r_min: float,
     r_max: float,
     n_bins: int = 100,
     sigma_smooth: float = 2.0,
     diagnostics: bool = False,
-) -> tuple[np.ndarray]:
+) -> tuple[numpy.ndarray]:
     """Computes the r-lnv2 gradient and finds the minimum as a function of `r`
     within the interval `[r_min, r_max]`
 
     Parameters
     ----------
-    r : np.ndarray
+    r : numpy.ndarray
         Radial separation
-    lnv2 : np.ndarray
+    lnv2 : numpy.ndarray
         Log-kinetic energy
-    mask_vr : np.ndarray
+    mask_vr : numpy.ndarray
         Mask for the selection of radial velocity
     n_points : int
         Number of minima points to compute
@@ -385,38 +570,38 @@ def gradient_minima(
 
     Returns
     -------
-    tuple[np.ndarray]
+    tuple[numpy.ndarray]
         Radial and minima coordinates.
     """
-    r_edges = np.linspace(r_min, r_max, n_points + 1)
-    counts_gradient_minima = np.zeros(n_points)
+    r_edges = numpy.linspace(r_min, r_max, n_points + 1)
+    counts_gradient_minima = numpy.zeros(n_points)
 
-    lnv2_bins_out = np.zeros((n_points, n_bins))
-    counts_out = np.zeros((n_points, n_bins))
-    counts_gradient_out = np.zeros((n_points, n_bins))
-    counts_gradient_smooth_out = np.zeros((n_points, n_bins))
+    lnv2_bins_out = numpy.zeros((n_points, n_bins))
+    counts_out = numpy.zeros((n_points, n_bins))
+    counts_gradient_out = numpy.zeros((n_points, n_bins))
+    counts_gradient_smooth_out = numpy.zeros((n_points, n_bins))
     
     for i in range(n_points):
         # Create mask for current r bin
         r_mask = (r > r_edges[i]) * (r < r_edges[i + 1])
 
         # Compute histogram of lnv2 values within the r bin and the vr mask
-        counts, lnv2_edges = np.histogram(lnv2[r_mask], bins=n_bins)
+        counts, lnv2_edges = numpy.histogram(lnv2[r_mask], bins=n_bins)
         
         # Compute the gradient of the histogram
-        counts_gradient = np.gradient(counts, np.mean(np.diff(lnv2_edges)))
-        counts_gradient /= np.max(np.abs(counts_gradient))
+        counts_gradient = numpy.gradient(counts, numpy.mean(numpy.diff(lnv2_edges)))
+        counts_gradient /= numpy.max(numpy.abs(counts_gradient))
         
         # Smooth the gradient
         counts_gradient_smooth = gaussian_filter1d(counts_gradient, sigma_smooth)
         
         # Find the lnv2 value corresponding to the minimum of the smoothed gradient
         lnv2_bins = 0.5 * (lnv2_edges[:-1] + lnv2_edges[1:])
-        counts_gradient_minima[i] = lnv2_bins[np.argmin(counts_gradient_smooth)]
+        counts_gradient_minima[i] = lnv2_bins[numpy.argmin(counts_gradient_smooth)]
 
         # Store diagnostics
         lnv2_bins_out[i, :] = lnv2_bins
-        counts_out[i, :] = counts / np.max(counts)
+        counts_out[i, :] = counts / numpy.max(counts)
         counts_gradient_out[i, :] = counts_gradient
         counts_gradient_smooth_out[i, :] = counts_gradient_smooth
     
@@ -433,12 +618,12 @@ def gradient_minima(
 
 def self_calibration(
     n_seeds: int,
-    seed_data: tuple[np.ndarray],
+    seed_data: tuple[numpy.ndarray],
     r_max: float,
     boxsize: float,
     minisize: float,
     save_path: str,
-    part_mass: float,
+    particle_mass: float,
     rhom: float,
     n_points: int = 20,
     perc: float = 0.995,
@@ -452,7 +637,7 @@ def self_calibration(
     ----------
     n_seeds : int
         Number of seeds to process
-    seed_data : tuple[np.ndarray]
+    seed_data : tuple[numpy.ndarray]
         Tuple with seed ID, positions, velocities, M200b and R200b.
     r_max : float
         Maximum distance to consider
@@ -462,7 +647,7 @@ def self_calibration(
         Size of mini box
     save_path : str
         Path to the mini boxes
-    part_mass : float
+    particle_mass : float
         Mass per particle
     rhom : float
         Mass density of the universe
@@ -486,8 +671,8 @@ def self_calibration(
         boxsize=boxsize,
         minisize=minisize,
         save_path=save_path,
-        part_mass=part_mass,
-        rhom=rhom,
+        particle_mass=particle_mass,
+        mass_density=rhom,
         n_threads=n_threads,
     )
 
@@ -541,7 +726,7 @@ def self_calibration(
     beta = slope_neg - 2 * alpha * x0
     
 
-    with h5.File(save_path + 'calibration_pars.hdf5', 'w') as hdf:
+    with h5py.File(save_path + 'calibration_pars.hdf5', 'w') as hdf:
         hdf.create_dataset('pos', data=[slope_pos, b_pivot_pos])
         hdf.create_dataset('neg/line', data=[slope_neg, b_pivot_neg])
         hdf.create_dataset('neg/quad', data=[alpha, beta, gamma])
@@ -578,7 +763,7 @@ def calibrate(
         alpha = (gamma - b_neg) / x0**2
         beta = slope_neg - 2 * alpha * x0
 
-        with h5.File(save_path + 'calibration_pars.hdf5', 'w') as hdf:
+        with h5py.File(save_path + 'calibration_pars.hdf5', 'w') as hdf:
             hdf.create_dataset('pos', data=[slope_pos, b_pivot_pos])
             hdf.create_dataset('neg/line', data=[slope_neg, b_pivot_neg])
             hdf.create_dataset('neg/quad', data=[alpha, beta, gamma])
