@@ -29,6 +29,10 @@ SIZE_TICKS: int = 12
 SIZE_LEGEND: int = 14
 SIZE_LABELS: int = 16
 
+COLOR_BLUE = '#6591b5'
+COLOR_GRAY = '#808080'
+COLOR_RED = '#db715b'
+
 
 def _compute_r200m_and_v200m(
     radial_distances: numpy.ndarray,
@@ -418,11 +422,11 @@ def _find_isolated_seeds(
     _validate_inputs_positive_number(
         isolation_radius_factor, 'isolation_radius_factor')
 
-    # This should never be needed as all seeds are assumed to have different 
+    # This should never be needed as all seeds are assumed to have different
     # masses and radii. But just in case.
     if isinstance(mass, (int, float)):
         mass = numpy.full(position.shape[0], mass)
-    
+
     if isinstance(radius, (int, float)):
         radius = numpy.full(position.shape[0], radius)
 
@@ -854,7 +858,7 @@ def _diagnostic_calibration_data_plot(
     # Create a color bar to display mass ranges.
     cax = fig.add_axes([1.01, 0.2, 0.01, 0.7])
     cbar = ColorbarBase(cax, cmap=cmap, orientation="vertical", extend='max')
-    cbar.set_label(r'Counts', fontsize=SIZE_LEGEND)
+    cbar.set_label(r'Counts (a.u.)', fontsize=SIZE_LEGEND)
     cbar.set_ticklabels([], fontsize=SIZE_TICKS)
     cbar.ax.tick_params(size=0, labelleft=False, labelright=False,
                         labeltop=False, labelbottom=False)
@@ -1065,7 +1069,7 @@ def get_calibration_data(
 
 
 def _cost_percentile(b: float, *data) -> float:
-    """Cost function for y-intercept b parameter. The optimal value of b is such
+    """Cost function for abscissa b parameter. The optimal value of b is such
     that the `target` percentile of particles is below the line.
 
     Parameters
@@ -1095,7 +1099,7 @@ def _cost_percentile(b: float, *data) -> float:
 
 
 def _cost_perpendicular_distance(b: float, *data) -> float:
-    """Cost function for y-intercept b parameter. The optimal value of b is such
+    """Cost function for abscissa b parameter. The optimal value of b is such
     that the perpendicular distance of all points to the line is maximal
     Parameters
     ----------
@@ -1125,15 +1129,76 @@ def _cost_perpendicular_distance(b: float, *data) -> float:
     return cost
 
 
+def _diagnostic_gradient_minima_plot(
+    save_path,
+    log_velocity_squared_bins,
+    counts,
+    counts_gradient,
+    counts_gradient_smooth,
+    radial_bins,
+    counts_gradient_minima,
+    diagnostics_title,
+) -> None:
+
+    pyplot.rcParams.update({
+        "text.usetex": True,
+        "font.family": "serif",
+        "figure.dpi": 150,
+    })
+
+    limits = ((-2, 2.5), (-1.1, 1.1))
+
+    # Figure out the number of panels
+    n_panels = log_velocity_squared_bins.shape[0]
+    n_rows = int(numpy.floor(numpy.sqrt(n_panels)))
+    n_cols = int(numpy.ceil(numpy.sqrt(n_panels)))
+
+    fig, axes = pyplot.subplots(n_rows, n_cols, sharex=True, sharey=True,
+                                figsize=(2.5*n_cols, 2.0*n_rows),
+                                gridspec_kw={'hspace': 0, 'wspace': 0})
+    fig.suptitle(diagnostics_title, fontsize=SIZE_LABELS)
+
+    for i, ax in enumerate(axes.flatten()):
+        ax.text(-1.8, 0.8, r'$r/R_{\rm 200m} = %.2f$' % radial_bins[i])
+        if i % n_cols == 0:
+            ax.set_ylabel('Counts (a.u.)', fontsize=SIZE_LABELS)
+        if i >= n_panels - n_cols:
+            ax.set_xlabel(r'$\ln(v^2/v_{\rm 200m}^2)$', fontsize=SIZE_LABELS)
+        ax.tick_params(axis="both", which="major", labelsize=SIZE_TICKS)
+        ax.set_xlim(*limits[0])
+        ax.set_ylim(*limits[1])
+
+        ax.plot(log_velocity_squared_bins[i, :], counts[i, :],
+                color=COLOR_GRAY, lw=1.0, label='Counts')
+        ax.plot(log_velocity_squared_bins[i, :], counts_gradient[i,
+                :], color=COLOR_BLUE, lw=1.0, label='Gradient')
+        ax.plot(log_velocity_squared_bins[i, :], counts_gradient_smooth[i,
+                :], color=COLOR_RED, lw=1.0, label='Smoothed gradient')
+        ax.axvline(
+            counts_gradient_minima[i], color='k', lw=1.5, ls='--', label='Minimum')
+
+        if i == 0:
+            ax.legend()
+
+    pyplot.tight_layout()
+    plot_suffix = diagnostics_title.split()[0]
+    pyplot.savefig(save_path + f'calibration_gradient_minima_{plot_suffix.lower()}.png',
+                   dpi=300, bbox_inches='tight')
+
+    return None
+
+
 def _gradient_minima(
     radius: numpy.ndarray,
     log_velocity_squared: numpy.ndarray,
     n_points: int,
     r_min: float,
     r_max: float,
+    save_path: str,
     n_bins: int = 100,
     sigma_smooth: float = 2.0,
     diagnostics: bool = True,
+    diagnostics_title: str = None,
 ) -> Tuple[numpy.ndarray]:
     """Computes the r-lnv2 gradient and finds the minimum as a function of `r`
     within the interval `[r_min, r_max]`
@@ -1161,7 +1226,7 @@ def _gradient_minima(
     radius_edges = numpy.linspace(r_min, r_max, n_points + 1)
     counts_gradient_minima = numpy.zeros(n_points)
 
-    lnv2_bins_out = numpy.zeros((n_points, n_bins))
+    log_velocity_squared_bins_out = numpy.zeros((n_points, n_bins))
     counts_out = numpy.zeros((n_points, n_bins))
     counts_gradient_out = numpy.zeros((n_points, n_bins))
     counts_gradient_smooth_out = numpy.zeros((n_points, n_bins))
@@ -1190,7 +1255,7 @@ def _gradient_minima(
             counts_gradient_smooth)]
 
         # Store diagnostics
-        lnv2_bins_out[i, :] = log_velocity_squared_bins
+        log_velocity_squared_bins_out[i, :] = log_velocity_squared_bins
         counts_out[i, :] = counts / numpy.max(counts)
         counts_gradient_out[i, :] = counts_gradient
         counts_gradient_smooth_out[i, :] = counts_gradient_smooth
@@ -1200,11 +1265,153 @@ def _gradient_minima(
 
     # Return diagnostics if requested
     if diagnostics:
-        return radial_bins, counts_gradient_minima, \
-            (lnv2_bins_out, counts_out, counts_gradient_out, counts_gradient_smooth_out)
-    else:
-        return radial_bins, counts_gradient_minima
+        _diagnostic_gradient_minima_plot(
+            save_path,
+            log_velocity_squared_bins_out,
+            counts_out,
+            counts_gradient_out,
+            counts_gradient_smooth_out,
+            radial_bins,
+            counts_gradient_minima,
+            diagnostics_title,
+        )
+    return radial_bins, counts_gradient_minima
 
+
+def _gradient_2d(
+    x: numpy.ndarray,
+    y: numpy.ndarray,
+    limits: tuple,
+    n_bins: int,
+):  
+    """Compute the gradient of y in bins of x"""
+    hist_z, hist_x, hist_y = numpy.histogram2d(x, y, bins=n_bins, range=limits, 
+                                               density=True)
+
+    # Bin centres
+    x = 0.5 * (hist_x[:-1] + hist_x[1:])
+    y = 0.5 * (hist_y[:-1] + hist_y[1:])
+
+    # Bin widths
+    dy = numpy.mean(numpy.diff(y))
+
+    # Meshgrids
+    x_mesh, y_mesh = numpy.meshgrid(x, y)
+    
+    # Compute gradient of z as a function of y for each x bin
+    z_grad = numpy.zeros_like(hist_z)
+    for i in range(n_bins):
+        z_grad[i, :] = numpy.gradient(hist_z[i, :], dy)
+
+    return x_mesh, y_mesh, z_grad
+
+
+def _diagnostic_self_calibration_plot(
+    save_path: str,
+    radius: numpy.ndarray,
+    radial_velocity: numpy.ndarray,
+    log_velocity_squared: numpy.ndarray,
+    parameters: Tuple[float]
+) -> None:
+    
+    pyplot.rcParams.update({
+        "text.usetex": True,
+        "font.family": "serif",
+        "figure.dpi": 150,
+    })
+
+    radius_pivot, slope_positive_vr, abscissa_positive_vr, slope_negative_vr, \
+        abscissa_negative_vr, alpha, beta, gamma = parameters
+    
+    # Compute cut lines
+    x = numpy.linspace(0, 2, 1000)
+    line_positive_vr = slope_positive_vr * (x - radius_pivot) + abscissa_positive_vr
+
+    x_low = numpy.linspace(0, radius_pivot, 1000)
+    x_high = numpy.linspace(radius_pivot, 2, 1000)
+    line_negative_vr = slope_negative_vr * (x - radius_pivot) + abscissa_negative_vr
+    curve_low = alpha*x_low**2 + beta*x_low + gamma
+    curve_high = slope_negative_vr * (x_high - radius_pivot) + abscissa_negative_vr
+
+    label_positive_vr = fr"${slope_positive_vr:.3f}(x-{radius_pivot:.2f}){abscissa_positive_vr:+.3f}$"
+    label_negative_vr = fr"${slope_negative_vr:.3f}(x-{radius_pivot:.2f}){abscissa_negative_vr:+.3f}$"
+
+    cmap = 'terrain'
+    limits = ((0, 2), (-2, 2.5))
+    mask_negative_vr = (radial_velocity < 0)
+    mask_positive_vr = ~mask_negative_vr
+
+    # Compute counts gradient for lower two panels
+    x_mesh_positive, y_mesh_positive, z_grad_positive = \
+        _gradient_2d(radius[mask_positive_vr], 
+                     log_velocity_squared[mask_positive_vr],
+                     limits=limits,
+                     n_bins=200
+        )
+    z_grad_positive = gaussian_filter1d(z_grad_positive, sigma=2.0)
+
+    x_mesh_negative, y_mesh_negative, z_grad_negative = \
+        _gradient_2d(radius[mask_negative_vr],
+                     log_velocity_squared[mask_negative_vr],
+                     limits=limits,
+                     n_bins=200
+        )
+    z_grad_negative = gaussian_filter1d(z_grad_negative, sigma=2.0)
+
+    fig, axes = pyplot.subplots(2, 2, figsize=(8, 8))
+    fig.suptitle('Calibration data', fontsize=SIZE_LABELS)
+    axes = axes.flatten()
+
+    for ax in axes:
+        ax.set_xlabel(r'$r/R_{\rm 200m}$', fontsize=SIZE_LABELS)
+        ax.set_ylabel(r'$\ln(v^2/v_{\rm 200m}^2)$', fontsize=SIZE_LABELS)
+        ax.set_xlim(*limits[0])
+        ax.set_ylim(*limits[1])
+        ax.tick_params(axis="both", which="major", labelsize=SIZE_TICKS)
+
+    # Create a color bar to display mass ranges.
+    cax = fig.add_axes([1.01, 0.2, 0.01, 0.7])
+    cbar = ColorbarBase(cax, cmap=cmap, orientation="vertical", extend='max')
+    cbar.set_label(r'Counts (a.u.)', fontsize=SIZE_LEGEND)
+    cbar.set_ticklabels([], fontsize=SIZE_TICKS)
+    cbar.ax.tick_params(size=0, labelleft=False, labelright=False,
+                        labeltop=False, labelbottom=False)
+
+    pyplot.sca(axes[0])
+    pyplot.title(r'$v_r > 0$', fontsize=SIZE_LABELS)
+    pyplot.hist2d(radius[mask_positive_vr],
+                  log_velocity_squared[mask_positive_vr],
+                  bins=200, cmap=cmap, range=limits)
+    pyplot.plot(x, line_positive_vr, lw=2.0, color="r", label=label_positive_vr)
+    pyplot.legend(fontsize=SIZE_LEGEND)
+
+    pyplot.sca(axes[1])
+    pyplot.title(r'$v_r < 0$', fontsize=SIZE_LABELS)
+    pyplot.hist2d(radius[mask_negative_vr],
+                  log_velocity_squared[mask_negative_vr],
+                  bins=200, cmap=cmap, range=limits)
+    pyplot.plot(x, line_negative_vr, lw=2.0, color="k", label=label_negative_vr)
+    pyplot.plot(x_low, curve_low, lw=2.0, color='r', ls='--')
+    pyplot.plot(x_high, curve_high, lw=2.0, color='r', ls='--', label='Low radius correction')
+    pyplot.legend(fontsize=SIZE_LEGEND)
+
+    pyplot.sca(axes[2])
+    pyplot.contourf(x_mesh_positive, y_mesh_positive, z_grad_positive.T, 
+                    levels=10, cmap=cmap)
+    pyplot.plot(x, line_positive_vr, lw=2.0, color="r", label='Cut line')
+
+    pyplot.sca(axes[3])
+    pyplot.contourf(x_mesh_negative, y_mesh_negative, z_grad_negative.T, 
+                    levels=10, cmap=cmap)
+    pyplot.plot(x, line_negative_vr, lw=2.0, color="k", label='Cut line')
+    pyplot.plot(x_low, curve_low, lw=2.0, color='r', ls='--')
+    pyplot.plot(x_high, curve_high, lw=2.0, color='r', ls='--', label='Low radius correction')
+
+    pyplot.tight_layout()
+    pyplot.savefig(save_path + 'calibration_classification_lines.png', dpi=300,
+                   bbox_inches='tight')
+
+    return None
 
 def self_calibration(
     n_seeds: int,
@@ -1276,8 +1483,7 @@ def self_calibration(
     mask_positive_vr = ~mask_negative_vr
     mask_low_radius = radius <= 2.0
     radius_pivot = 0.5
-    def line_model(x, slope, abscissa): return slope * \
-        (x - radius_pivot) + abscissa
+    line_model = lambda x, slope, abscissa: slope * (x - radius_pivot) + abscissa
 
     # For vr > 0 ===============================================================
     radial_bins, gradient_minumum = _gradient_minima(
@@ -1286,7 +1492,9 @@ def self_calibration(
         n_points=n_points,
         r_min=gradient_radial_lims[0],
         r_max=gradient_radial_lims[1],
-        diagnostics=diagnostics
+        save_path=save_path,
+        diagnostics=diagnostics,
+        diagnostics_title=r'Positive $v_r$ slope calibration',
     )
     # Find slope by fitting to the minima.
     (slope_positive_vr, abscissa_p), _ = curve_fit(line_model, radial_bins, gradient_minumum,
@@ -1294,7 +1502,7 @@ def self_calibration(
 
     # Find intercept by finding the value that contains 'perc' percent of
     # particles below the line at fixed slope 'm_pos'.
-    res = minimize(
+    result = minimize(
         fun=_cost_percentile,
         x0=1.1 * abscissa_p,
         bounds=((abscissa_p, 5.0),),
@@ -1303,7 +1511,7 @@ def self_calibration(
               slope_positive_vr, percent, radius_pivot),
         method='Nelder-Mead',
     )
-    abscissa_positive_vr = res.x[0]
+    abscissa_positive_vr = result.x[0]
 
     # For vr < 0 ===============================================================
     radial_bins, gradient_minumum = _gradient_minima(
@@ -1312,7 +1520,9 @@ def self_calibration(
         n_points=n_points,
         r_min=gradient_radial_lims[0],
         r_max=gradient_radial_lims[1],
-        diagnostics=diagnostics
+        save_path=save_path,
+        diagnostics=diagnostics,
+        diagnostics_title=r'Negative $v_r$ slope calibration',
     )
     # Find slope by fitting to the minima.
     (slope_negative_vr, abscissa_n), _ = curve_fit(line_model, radial_bins, gradient_minumum,
@@ -1321,7 +1531,7 @@ def self_calibration(
     # Find intercept by finding the value that maximizes the perpendicular
     # distance to the line at fixed slope of all points within a perpendicular
     # 'width' distance from the line (ignoring all others).
-    res = minimize(
+    result = minimize(
         fun=_cost_perpendicular_distance,
         x0=0.8 * abscissa_n,
         bounds=((0.5 * abscissa_n, abscissa_n),),
@@ -1329,9 +1539,9 @@ def self_calibration(
               slope_negative_vr, width, radius_pivot),
         method='Nelder-Mead',
     )
-    b_pivot_neg = res.x[0]
+    abscissa_negative_vr = result.x[0]
 
-    b_neg = b_pivot_neg - slope_negative_vr * radius_pivot
+    b_neg = abscissa_negative_vr - slope_negative_vr * radius_pivot
     gamma = 2.
     alpha = (gamma - b_neg) / radius_pivot**2
     beta = slope_negative_vr - 2 * alpha * radius_pivot
@@ -1339,8 +1549,28 @@ def self_calibration(
     with h5py.File(save_path + 'calibration_pars.hdf5', 'w') as hdf:
         hdf.create_dataset(
             'pos', data=[slope_positive_vr, abscissa_positive_vr])
-        hdf.create_dataset('neg/line', data=[slope_negative_vr, b_pivot_neg])
+        hdf.create_dataset('neg/line', data=[slope_negative_vr, abscissa_negative_vr])
         hdf.create_dataset('neg/quad', data=[alpha, beta, gamma])
+
+    if diagnostics:
+        parameters = (
+            radius_pivot,
+            slope_positive_vr, 
+            abscissa_positive_vr,
+            slope_negative_vr,
+            abscissa_negative_vr,
+            alpha,
+            beta,
+            gamma,
+        )
+        
+        _diagnostic_self_calibration_plot(
+            save_path=save_path,
+            radius=radius,
+            radial_velocity=radial_velocity,
+            log_velocity_squared=log_velocity_squared,
+            parameters=parameters,
+        )
 
     return
 

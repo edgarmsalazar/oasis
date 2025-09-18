@@ -11,17 +11,10 @@ import numpy
 import pytest
 
 from oasis import calibration
-from oasis.common import G_GRAVITY
 
 
 class TestComputeR200mAndV200m:
     """Test suite for _compute_r200m_and_v200m function."""
-
-    # @pytest.fixture
-    # def mock_gravity(self):
-    #     """Mock gravitational constant for testing."""
-    #     with patch('G_GRAVITY', G_GRAVITY):  # Typical value in (km/s)^2 Mpc/M_sun
-    #         yield G_GRAVITY
 
     def test_basic_computation(self):
         """Test basic R200m and V200 computation with well-behaved data."""
