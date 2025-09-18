@@ -21,7 +21,6 @@ from oasis.minibox import get_mini_box_id, load_particles
 
 __all__ = [
     'get_calibration_data',
-    'self_calibration',
     'calibrate',
 ]
 
@@ -170,10 +169,10 @@ def _get_candidate_particle_data(
     mini_box_id : int
         ID of the minibox containing the seeds. Must be a valid minibox ID
         for the given box configuration.
-    pos_seed : np.ndarray
+    position_seeds : numpy.ndarray
         Seed positions with shape (n_seeds, 3). Each row contains the 
         (x, y, z) coordinates of a seed in simulation units.
-    vel_seed : np.ndarray
+    velocity_seeds : numpy.ndarray
         Seed velocities with shape (n_seeds, 3). Each row contains the
         (vx, vy, vz) velocity components of a seed in simulation units.
     r_max : float
@@ -196,7 +195,7 @@ def _get_candidate_particle_data(
 
     Returns
     -------
-    np.ndarray
+    numpy.ndarray
         Particle data array with shape (n_particles, 3) where each row contains:
         - Column 0: r/R200m - Radial distance scaled by R200m
         - Column 1: vr/V200 - Radial velocity scaled by V200  
@@ -231,30 +230,31 @@ def _get_candidate_particle_data(
     Examples
     --------
     >>> # Process seeds in minibox 42
-    >>> pos_seeds = np.array([[10.0, 15.0, 20.0], [25.0, 30.0, 35.0]])
-    >>> vel_seeds = np.array([[100.0, 50.0, -75.0], [-80.0, 120.0, 90.0]])
+    >>> pos_seeds = numpy.array([[10.0, 15.0, 20.0], [25.0, 30.0, 35.0]])
+    >>> vel_seeds = numpy.array([[100.0, 50.0, -75.0], [-80.0, 120.0, 90.0]])
     >>> data = _get_candidate_particle_data(
     ...     mini_box_id=42,
-    ...     pos_seed=pos_seeds, 
-    ...     vel_seed=vel_seeds,
+    ...     position_seeds=pos_seeds, 
+    ...     velocity_seeds=vel_seeds,
     ...     r_max=5.0,
     ...     boxsize=100.0,
     ...     minisize=10.0,
     ...     save_path="/data/miniboxes/",
-    ...     part_mass=1e10,
-    ...     rhom=2.78e11
+    ...     particle_mass=1e10,
+    ...     mass_density=2.78e11
     ... )
-    >>> print(f"Processed {len(data)} particles from {len(pos_seeds)} seeds")
+    >>> print(f"Processed {data.shape[1]} particles from {len(pos_seeds)} seeds")
 
     See Also
     --------
-    _compute_r200m_and_v200 : Computes virial radius and velocity
+    _compute_r200m_and_v200m : Computes virial radius and velocity
     load_particles : Loads particles from minibox files
     velocity_components : Decomposes velocities into radial/tangential components
     """
     # Validate inputs
     _validate_inputs_boxsize_minisize(boxsize, minisize)
-    _validate_inputs_mini_box_id(mini_box_id, int(numpy.ceil(boxsize/minisize)))
+    _validate_inputs_mini_box_id(
+        mini_box_id, int(numpy.ceil(boxsize/minisize)))
     _validate_inputs_coordinate_arrays(position_seeds, 'seed positions')
     _validate_inputs_coordinate_arrays(velocity_seeds, 'seed velocities')
     _validate_inputs_existing_path(save_path)
@@ -317,7 +317,97 @@ def _find_isolated_seeds(
     isolation_factor: float = 0.2,
     isolation_radius_factor: float = 2.0,
 ) -> numpy.ndarray:
-    """"""
+    """Find seeds that are isolated from other massive neighbors.
+
+    This function identifies seeds that dominate their local environment by
+    checking that all neighboring seeds within a specified isolation radius
+    have masses below a threshold fraction of the candidate seed's mass.
+
+    The isolation criterion requires that all neighbors within an isolation
+    radius (isolation_radius_factor × R200) must have masses less than
+    isolation_factor × M200 of the candidate seed.
+
+    Parameters
+    ----------
+    position : numpy.ndarray
+        Seed positions with shape (n_seeds, 3). Each row contains the 
+        (x, y, z) coordinates of a seed in simulation units.
+    mass : Union[float, numpy.ndarray]
+        Mass of each seed in simulation units (typically M_sun). Can be
+        a scalar if all seeds have the same mass, or array with shape (n_seeds,).
+        Must be positive.
+    radius : Union[float, numpy.ndarray]
+        Virial radius R200 of each seed in simulation units. Can be
+        a scalar if all seeds have the same radius, or array with shape (n_seeds,).
+        Must be positive.
+    max_seeds : int
+        Maximum number of isolated seeds to return. Must be positive.
+        Function stops searching once this many isolated seeds are found.
+    boxsize : float
+        Size of the cubic simulation box in simulation units. Must be positive.
+        Used for periodic boundary condition calculations.
+    isolation_factor : float, optional
+        Maximum allowed mass ratio for neighbors. Neighbors must have
+        mass < isolation_factor × seed_mass to satisfy isolation criterion.
+        Default is 0.2 (20%).
+    isolation_radius_factor : float, optional
+        Factor multiplying R200 to define isolation radius. Neighbors within
+        isolation_radius_factor × R200 are checked. Default is 2.0.
+
+    Returns
+    -------
+    numpy.ndarray
+        Array of indices of isolated seeds with shape (n_isolated,).
+        Indices correspond to rows in the input position array.
+        Returned in order of discovery, up to max_seeds entries.
+
+    Raises
+    ------
+    TypeError
+        If position cannot be converted to numpy array, or if max_seeds
+        is not an integer.
+    ValueError
+        If array shapes are incompatible, if any scalar parameters are
+        non-positive, or if position array has wrong dimensions.
+
+    Notes
+    -----
+    - Uses periodic boundary conditions for distance calculations
+    - Searches seeds in input order, stopping when max_seeds are found
+    - A seed with no neighbors within isolation radius is automatically isolated
+    - Isolation radius scales with each seed's individual R200 value
+    - Memory usage is O(n_seeds²) in worst case for distance calculations
+
+    Examples
+    --------
+    >>> # Find up to 100 isolated seeds
+    >>> positions = numpy.random.uniform(0, 100, (1000, 3))
+    >>> masses = numpy.random.uniform(1e12, 1e15, 1000)
+    >>> radii = (masses / 1e12) ** (1/3) * 0.5
+    >>> isolated = _find_isolated_seeds(
+    ...     position=positions,
+    ...     mass=masses, 
+    ...     radius=radii,
+    ...     max_seeds=100,
+    ...     boxsize=100.0,
+    ...     isolation_factor=0.3,
+    ...     isolation_radius_factor=2.5
+    ... )
+    >>> print(f"Found {len(isolated)} isolated seeds")
+
+    >>> # Handle uniform mass case
+    >>> isolated = _find_isolated_seeds(
+    ...     position=positions,
+    ...     mass=1e13,  # All seeds have same mass
+    ...     radius=1.0, # All seeds have same radius
+    ...     max_seeds=50,
+    ...     boxsize=100.0
+    ... )
+
+    See Also
+    --------
+    relative_coordinates : Computes relative positions with periodic boundaries
+    """
     # Input validation
     _validate_inputs_coordinate_arrays(position, 'position')
     _validate_inputs_positive_number(max_seeds, 'max_seeds')
@@ -370,7 +460,70 @@ def _group_seeds_by_minibox(
     boxsize: float,
     minisize: float,
 ) -> Dict[int, Tuple[numpy.ndarray, numpy.ndarray]]:
-    """"""
+    """Group seeds by their containing minibox for efficient parallel processing.
+
+    This function assigns each seed to its containing minibox based on spatial
+    coordinates and returns a dictionary mapping minibox IDs to the positions
+    and velocities of seeds within that minibox.
+
+    Parameters
+    ----------
+    position : numpy.ndarray
+        Seed positions with shape (n_seeds, 3). Each row contains the 
+        (x, y, z) coordinates of a seed in simulation units.
+    velocity : numpy.ndarray
+        Seed velocities with shape (n_seeds, 3). Each row contains the
+        (vx, vy, vz) velocity components of a seed in simulation units.
+    boxsize : float
+        Size of the cubic simulation box in simulation units. Must be positive.
+    minisize : float
+        Size of each cubic minibox in simulation units. Must be positive
+        and typically smaller than boxsize. The number of miniboxes per
+        dimension is ceil(boxsize/minisize).
+
+    Returns
+    -------
+    Dict[int, Tuple[numpy.ndarray, numpy.ndarray]]
+        Dictionary mapping minibox IDs to tuples of (positions, velocities).
+        Each minibox ID maps to:
+        - positions: numpy.ndarray with shape (n_seeds_in_box, 3)
+        - velocities: numpy.ndarray with shape (n_seeds_in_box, 3)
+        Only miniboxes containing at least one seed are included.
+
+    Raises
+    ------
+    TypeError
+        If position or velocity arrays cannot be converted to numpy arrays.
+    ValueError
+        If array shapes are incompatible, if boxsize or minisize are
+        non-positive, or if minisize > boxsize.
+
+    Notes
+    -----
+    - Minibox IDs are computed using spatial hashing of seed coordinates
+    - Empty miniboxes (containing no seeds) are not included in the result
+    - Seeds exactly on minibox boundaries are assigned consistently
+    - Memory usage scales linearly with the number of seeds
+
+    Examples
+    --------
+    >>> # Group 1000 seeds into miniboxes
+    >>> positions = numpy.random.uniform(0, 100, (1000, 3))
+    >>> velocities = numpy.random.normal(0, 200, (1000, 3))
+    >>> groups = _group_seeds_by_minibox(
+    ...     position=positions,
+    ...     velocity=velocities, 
+    ...     boxsize=100.0,
+    ...     minisize=10.0
+    ... )
+    >>> print(f"Seeds distributed across {len(groups)} miniboxes")
+    >>> for box_id, (pos, vel) in groups.items():
+    ...     print(f"Minibox {box_id}: {len(pos)} seeds")
+
+    See Also
+    --------
+    get_mini_box_id : Computes minibox ID from spatial coordinates
+    """
     # Validate inputs
     _validate_inputs_coordinate_arrays(position, 'position')
     _validate_inputs_coordinate_arrays(velocity, 'velocity')
@@ -402,37 +555,120 @@ def _select_candidate_seeds(
     isolation_radius_factor: float = 2.0,
     n_threads: int = None,
 ) -> tuple[numpy.ndarray]:
-    """Locates for the largest `M_200b` seeds and searches for all the particles
-    around them up to a distance `r_max`.
+    """Select isolated massive seeds and extract scaled particle data around them.
 
-    Only seeds that dominate their environment are eligible. This means that the 
-    mass of all other seeds up to a distance of 2*R_200b must be at most 20% the
-    mass of the seed.
+    This function identifies the most massive isolated seeds from the input
+    catalog and processes particles within r_max of each seed to compute
+    scaled kinematic quantities. Only seeds that dominate their local environment
+    are considered (isolation criterion: all neighbors within 2×R200 must have
+    mass < 0.2×M200 of the seed).
+
+    The function performs the following workflow:
+    1. Sorts seeds by mass in descending order
+    2. Finds up to n_seeds isolated seeds using the isolation criterion
+    3. Groups selected seeds by minibox for efficient parallel processing
+    4. Extracts and processes particles around each seed
+    5. Returns scaled kinematic data for all processed particles
 
     Parameters
     ----------
     n_seeds : int
-        Number of seeds to process
-    seed_data : tuple[numpy.ndarray]
-        Tuple with seed ID, positions, velocities, M200b and R200b.
+        Maximum number of seeds to process. Must be positive.
+        Function selects up to this many of the most massive isolated seeds.
+    seed_data : Tuple[numpy.ndarray]
+        Tuple containing (position, velocity, mass, radius) arrays:
+        - position: shape (n_total_seeds, 3) - seed coordinates
+        - velocity: shape (n_total_seeds, 3) - seed velocities  
+        - mass: shape (n_total_seeds,) - seed masses (M200)
+        - radius: shape (n_total_seeds,) - seed virial radii (R200)
     r_max : float
-        Maximum distance to consider
+        Maximum distance from seed centers to consider particles, in 
+        simulation units. Must be positive.
     boxsize : float
-        Size of simulation box
+        Size of the cubic simulation box in simulation units. Must be positive.
     minisize : float
-        Size of mini box
+        Size of each cubic minibox in simulation units. Must be positive
+        and typically smaller than boxsize.
     save_path : str
-        Path to the mini boxes
+        Path to directory containing minibox HDF5 files. Must be a valid
+        directory path with the expected minibox file structure.
     particle_mass : float
-        Mass per particle
-    rhom : float
-        Mass density of the universe
+        Mass of each simulation particle in simulation units (typically M_sun).
+        Must be positive.
+    mass_density : float
+        Mean matter density of the universe in simulation units 
+        (typically M_sun/Mpc^3). Must be positive.
+    isolation_factor : float, optional
+        Maximum allowed mass ratio for isolation criterion. Neighbors must have
+        mass < isolation_factor × seed_mass. Default is 0.2 (20%).
+    isolation_radius_factor : float, optional
+        Factor multiplying R200 to define isolation radius for neighbor search.
+        Default is 2.0.
+    n_threads : int, optional
+        Number of threads for parallel processing. If None, uses half of
+        available CPU cores, capped by the number of miniboxes to process.
 
     Returns
     -------
     numpy.ndarray
-        Radial distance, radial velocity, and log of the square of the velocity 
-        in units of R200m and M200m.
+        Particle data array with shape (n_particles, 3) where each row contains:
+        - Column 0: r/R200m - Radial distance scaled by R200m
+        - Column 1: vr/V200 - Radial velocity scaled by V200  
+        - Column 2: ln(v²/V200²) - Natural log of velocity squared scaled by V200²
+
+        All quantities are dimensionless and scaled by the virial properties
+        computed individually for each seed.
+
+    Raises
+    ------
+    TypeError
+        If n_seeds is not an integer, or if array inputs in seed_data cannot
+        be converted to numpy arrays.
+    ValueError
+        If n_seeds is non-positive, if array shapes in seed_data are incompatible,
+        or if any scalar parameters are non-positive.
+    FileNotFoundError
+        If save_path doesn't exist or required minibox files are missing.
+    RuntimeError
+        If parallel processing fails and fallback to sequential mode is needed,
+        or if particle loading encounters errors.
+
+    Notes
+    -----
+    - Seeds are ranked by mass, with the most massive considered first
+    - Isolation criterion ensures selected seeds dominate their local environment
+    - Uses periodic boundary conditions for all distance calculations
+    - Automatically falls back to sequential processing if parallelization fails
+    - Memory usage scales with the number of particles within r_max of all seeds
+    - Progress bars show processing status for miniboxes
+
+    Examples
+    --------
+    >>> # Process 100 most massive isolated seeds
+    >>> positions = numpy.random.uniform(0, 100, (10000, 3))
+    >>> velocities = numpy.random.normal(0, 200, (10000, 3)) 
+    >>> masses = numpy.random.lognormal(30, 1, 10000)
+    >>> radii = (masses / 1e12) ** (1/3) * 0.5
+    >>> seed_data = (positions, velocities, masses, radii)
+    >>> 
+    >>> results = _select_candidate_seeds(
+    ...     n_seeds=100,
+    ...     seed_data=seed_data,
+    ...     r_max=5.0,
+    ...     boxsize=100.0,
+    ...     minisize=10.0, 
+    ...     save_path="/data/miniboxes/",
+    ...     particle_mass=1e10,
+    ...     mass_density=2.78e11,
+    ...     n_threads=8
+    ... )
+    >>> print(f"Processed {len(results)} particles from isolated seeds")
+
+    See Also
+    --------
+    _find_isolated_seeds : Identifies seeds meeting isolation criterion
+    _group_seeds_by_minibox : Groups seeds for efficient parallel processing
+    _get_candidate_particle_data : Processes particles around seeds in one minibox
     """
     # Validate inputs
     _validate_inputs_positive_number(n_seeds, 'n_seeds')
@@ -516,7 +752,72 @@ def _diagnostic_calibration_data_plot(
     radial_velocity: numpy.ndarray,
     log_velocity_squared: numpy.ndarray,
 ) -> None:
+    """Generate diagnostic plots for calibration data visualization.
 
+    This function creates a two-panel diagnostic plot showing the distribution
+    of particle data in the (r/R200m, ln(v²/V200²)) space, separated by the
+    sign of the radial velocity. The plots help visualize the phase space
+    distribution of particles around halos for calibration purposes.
+
+    Parameters
+    ----------
+    save_path : str
+        Directory path where the diagnostic plot will be saved. Must be a valid
+        directory path with write permissions. The plot is saved as 
+        'calibration_data.png'.
+    radius : numpy.ndarray
+        Array of radial distances scaled by R200m with shape (n_particles,).
+        Values should typically be positive and in the range [0, 3].
+    radial_velocity : numpy.ndarray
+        Array of radial velocities scaled by V200 with shape (n_particles,).
+        Values can be positive (outflow) or negative (inflow).
+    log_velocity_squared : numpy.ndarray
+        Array of natural logarithm of velocity squared scaled by V200² with
+        shape (n_particles,). Values typically range from -3 to +3.
+
+    Returns
+    -------
+    None
+        Function saves the plot to disk but returns nothing.
+
+    Raises
+    ------
+    TypeError
+        If any array inputs cannot be converted to numpy arrays.
+    ValueError
+        If array shapes are incompatible or if save_path is not a valid string.
+    OSError
+        If save_path directory doesn't exist or lacks write permissions.
+
+    Notes
+    -----
+    - Creates two side-by-side 2D histograms for vr > 0 and vr < 0
+    - Uses 200×200 bins for high-resolution visualization
+    - Plot ranges are fixed: r/R200m ∈ [0,2], ln(v²/V200²) ∈ [-2,2.5]
+    - Uses 'terrain' colormap for particle density visualization
+    - Includes LaTeX formatting for axis labels and titles
+    - Colorbar shows relative particle counts but without tick labels
+    - Figure is saved at 300 DPI for publication quality
+
+    Examples
+    --------
+    >>> # Generate diagnostic plot for calibration data
+    >>> radii = numpy.random.uniform(0.1, 2.0, 50000) 
+    >>> vr = numpy.random.normal(0, 1, 50000)
+    >>> log_v2 = numpy.random.normal(0, 1.5, 50000)
+    >>> _diagnostic_calibration_data_plot(
+    ...     save_path="/output/plots/",
+    ...     radius=radii,
+    ...     radial_velocity=vr, 
+    ...     log_velocity_squared=log_v2
+    ... )
+    >>> # Plot saved to /output/plots/calibration_data.png
+
+    See Also
+    --------
+    matplotlib.pyplot.hist2d : Creates 2D histogram plots
+    matplotlib.colorbar.ColorbarBase : Creates standalone colorbars
+    """
     pyplot.rcParams.update({
         "text.usetex": True,
         "font.family": "serif",
@@ -545,23 +846,23 @@ def _diagnostic_calibration_data_plot(
     cbar = ColorbarBase(cax, cmap=cmap, orientation="vertical", extend='max')
     cbar.set_label(r'Counts', fontsize=SIZE_LEGEND)
     cbar.set_ticklabels([], fontsize=SIZE_TICKS)
-    cbar.ax.tick_params(size=0, labelleft=False, labelright=False, 
+    cbar.ax.tick_params(size=0, labelleft=False, labelright=False,
                         labeltop=False, labelbottom=False)
 
     pyplot.sca(axes[0])
     pyplot.title(r'$v_r > 0$', fontsize=SIZE_LABELS)
-    pyplot.hist2d(radius[mask_positive_vr], 
-                  log_velocity_squared[mask_positive_vr], 
+    pyplot.hist2d(radius[mask_positive_vr],
+                  log_velocity_squared[mask_positive_vr],
                   bins=200, cmap=cmap, range=limits)
 
     pyplot.sca(axes[1])
     pyplot.title(r'$v_r < 0$', fontsize=SIZE_LABELS)
-    pyplot.hist2d(radius[mask_negative_vr], 
-                  log_velocity_squared[mask_negative_vr], 
+    pyplot.hist2d(radius[mask_negative_vr],
+                  log_velocity_squared[mask_negative_vr],
                   bins=200, cmap=cmap, range=limits)
 
     pyplot.tight_layout()
-    pyplot.savefig(save_path + 'calibration_data.png', dpi=300, 
+    pyplot.savefig(save_path + 'calibration_data.png', dpi=300,
                    bbox_inches='tight')
 
     return None
@@ -581,33 +882,136 @@ def get_calibration_data(
     n_threads: int = None,
     diagnostics: bool = True,
 ) -> Tuple[numpy.ndarray]:
-    """_summary_
+    """Generate or load calibration data from isolated massive seed halos.
+
+    This function either loads pre-computed calibration data from an HDF5 file
+    or generates new calibration data by processing particles around isolated
+    massive seeds. The calibration data consists of scaled kinematic quantities
+    (radial distance, radial velocity, velocity magnitude) that can be used
+    for statistical analysis or machine learning applications.
+
+    The function implements a caching mechanism: if 'calibration_data.hdf5' exists
+    in save_path, the data is loaded from disk. Otherwise, new data is computed
+    and saved for future use.
 
     Parameters
     ----------
     n_seeds : int
-        Number of seeds to process
-    seed_data : tuple[numpy.ndarray]
-        Tuple with seed positions, velocities, M200b and R200b.
+        Maximum number of seeds to process for calibration. Must be positive.
+        Function selects up to this many of the most massive isolated seeds.
+    seed_data : Tuple[numpy.ndarray]
+        Tuple containing (position, velocity, mass, radius) arrays:
+        - position: shape (n_total_seeds, 3) - seed coordinates in simulation units
+        - velocity: shape (n_total_seeds, 3) - seed velocities in simulation units
+        - mass: shape (n_total_seeds,) - seed masses M200 in simulation units
+        - radius: shape (n_total_seeds,) - seed virial radii R200 in simulation units
     r_max : float
-        Maximum distance to consider
+        Maximum distance from seed centers to consider particles, in 
+        simulation units. Must be positive, typically 2-5 × R200.
     boxsize : float
-        Size of simulation box
+        Size of the cubic simulation box in simulation units. Must be positive.
     minisize : float
-        Size of mini box
+        Size of each cubic minibox in simulation units. Must be positive
+        and smaller than boxsize.
     save_path : str
-        Path to the mini boxes
+        Directory path for reading/writing calibration data and diagnostic plots.
+        Must be a valid directory path with read/write permissions.
     particle_mass : float
-        Mass per particle
-    rhom : float
-        Mass density of the universe
-    n_threads : int
-        Number of threads, by default None
+        Mass of each simulation particle in simulation units (typically M_sun).
+        Must be positive.
+    mass_density : float
+        Mean matter density of the universe in simulation units 
+        (typically M_sun/Mpc^3). Must be positive.
+    isolation_factor : float, optional
+        Maximum allowed mass ratio for isolation criterion. Neighbors must have
+        mass < isolation_factor × seed_mass. Default is 0.2 (20%).
+    isolation_radius_factor : float, optional
+        Factor multiplying R200 to define isolation radius for neighbor search.
+        Default is 2.0.
+    n_threads : int, optional
+        Number of threads for parallel processing. If None, uses half of
+        available CPU cores. Only used when generating new data.
+    diagnostics : bool, optional
+        Whether to generate diagnostic plots of the calibration data.
+        Default is True.
 
     Returns
     -------
-    tuple[numpy.ndarray]
-        Radial distance, radial velocity, and log of the square of the velocity
+    Tuple[numpy.ndarray]
+        Tuple containing three arrays with calibration data:
+        - radius: numpy.ndarray with shape (n_particles,)
+            Radial distances scaled by R200m (dimensionless)
+        - radial_velocity: numpy.ndarray with shape (n_particles,) 
+            Radial velocities scaled by V200 (dimensionless)
+        - log_velocity_squared: numpy.ndarray with shape (n_particles,)
+            Natural log of velocity squared scaled by V200² (dimensionless)
+
+    Raises
+    ------
+    TypeError
+        If n_seeds is not an integer, or if array inputs in seed_data cannot
+        be converted to numpy arrays.
+    ValueError
+        If n_seeds is non-positive, if array shapes in seed_data are incompatible,
+        or if any scalar parameters are non-positive.
+    FileNotFoundError
+        If save_path doesn't exist, or if required minibox files are missing
+        when generating new data.
+    OSError
+        If HDF5 file cannot be read/written, or if directory permissions
+        are insufficient.
+
+    Notes
+    -----
+    - Implements caching via HDF5 file to avoid recomputation
+    - Automatically generates diagnostic plots when diagnostics=True
+    - Uses isolation criterion to ensure seeds dominate their environment
+    - All returned quantities are dimensionless and scaled by virial properties
+    - HDF5 file structure: 'r', 'vr', 'lnv2' datasets
+    - Diagnostic plot saved as 'calibration_data.png' in save_path
+
+    Examples
+    --------
+    >>> # Generate calibration data from 500 massive isolated seeds
+    >>> positions = numpy.random.uniform(0, 100, (50000, 3))
+    >>> velocities = numpy.random.normal(0, 200, (50000, 3))
+    >>> masses = numpy.random.lognormal(30, 1, 50000) 
+    >>> radii = (masses / 1e12) ** (1/3) * 0.5
+    >>> seed_data = (positions, velocities, masses, radii)
+    >>> 
+    >>> r, vr, lnv2 = get_calibration_data(
+    ...     n_seeds=500,
+    ...     seed_data=seed_data,
+    ...     r_max=4.0,
+    ...     boxsize=100.0,
+    ...     minisize=10.0,
+    ...     save_path="/data/calibration/",
+    ...     particle_mass=1e10,
+    ...     mass_density=2.78e11,
+    ...     n_threads=16,
+    ...     diagnostics=True
+    ... )
+    >>> print(f"Calibration data: {len(r)} particles")
+    >>> print(f"Radius range: [{r.min():.2f}, {r.max():.2f}]")
+
+    >>> # Load existing calibration data (fast)
+    >>> r, vr, lnv2 = get_calibration_data(
+    ...     n_seeds=500,  # Parameters don't matter for loading
+    ...     seed_data=seed_data,
+    ...     r_max=4.0,
+    ...     boxsize=100.0,
+    ...     minisize=10.0,
+    ...     save_path="/data/calibration/",  # Must contain calibration_data.hdf5
+    ...     particle_mass=1e10,
+    ...     mass_density=2.78e11,
+    ...     diagnostics=False  # Skip plot generation
+    ... )
+
+    See Also
+    --------
+    _select_candidate_seeds : Core function for generating calibration data
+    _diagnostic_calibration_data_plot : Creates diagnostic visualizations
+    h5py.File : HDF5 file interface for data persistence
     """
     file_name = save_path + 'calibration_data.hdf5'
     try:
@@ -650,7 +1054,7 @@ def get_calibration_data(
     return radius, radial_velocity, log_velocity_squared
 
 
-def cost_percentile(b: float, *data) -> float:
+def _cost_percentile(b: float, *data) -> float:
     """Cost function for y-intercept b parameter. The optimal value of b is such
     that the `target` percentile of particles is below the line.
 
@@ -666,13 +1070,21 @@ def cost_percentile(b: float, *data) -> float:
     -------
     float
     """
-    r, lnv2, slope, target, r0 = data
-    line = slope * (r - r0) + b
-    below_line = (lnv2 < line).sum()
-    return numpy.log((target - below_line / r.shape[0]) ** 2)
+    radius, log_velocity_squared, slope, target, radius_pivot = data
+    line = slope * (radius - radius_pivot) + b
+
+    # Total number of elements below the line
+    below_line = (log_velocity_squared < line).sum()
+
+    # Fraction of elements below the line
+    fraction = target - below_line / radius.shape[0]
+
+    # Cost to minimize
+    cost = numpy.log(fraction ** 2)
+    return cost
 
 
-def cost_perp_distance(b: float, *data) -> float:
+def _cost_perpendicular_distance(b: float, *data) -> float:
     """Cost function for y-intercept b parameter. The optimal value of b is such
     that the perpendicular distance of all points to the line is maximal
     Parameters
@@ -688,22 +1100,31 @@ def cost_perp_distance(b: float, *data) -> float:
     -------
     float
     """
-    r, lnv2, slope, width, r0 = data
-    line = slope * (r - r0) + b
-    d = numpy.abs(lnv2 - line) / numpy.sqrt(1 + slope**2)
-    return -numpy.log(numpy.mean(d[(d < width)] ** 2))
+    radius, log_velocity_squared, slope, width, radius_pivot = data
+    line = slope * (radius - radius_pivot) + b
+
+    # Perpendicular distance to the line
+    distance = numpy.abs(log_velocity_squared - line) / \
+        numpy.sqrt(1 + slope**2)
+
+    # Select only elements within the width of the band
+    distance_within_band = distance[(distance < width)]
+
+    # Cost to maximize (thus negative)
+    cost = -numpy.log(numpy.mean(distance_within_band ** 2))
+    return cost
 
 
-def gradient_minima(
-    r: numpy.ndarray,
-    lnv2: numpy.ndarray,
+def _gradient_minima(
+    radius: numpy.ndarray,
+    log_velocity_squared: numpy.ndarray,
     n_points: int,
     r_min: float,
     r_max: float,
     n_bins: int = 100,
     sigma_smooth: float = 2.0,
-    diagnostics: bool = False,
-) -> tuple[numpy.ndarray]:
+    diagnostics: bool = True,
+) -> Tuple[numpy.ndarray]:
     """Computes the r-lnv2 gradient and finds the minimum as a function of `r`
     within the interval `[r_min, r_max]`
 
@@ -727,7 +1148,7 @@ def gradient_minima(
     tuple[numpy.ndarray]
         Radial and minima coordinates.
     """
-    r_edges = numpy.linspace(r_min, r_max, n_points + 1)
+    radius_edges = numpy.linspace(r_min, r_max, n_points + 1)
     counts_gradient_minima = numpy.zeros(n_points)
 
     lnv2_bins_out = numpy.zeros((n_points, n_bins))
@@ -737,10 +1158,12 @@ def gradient_minima(
 
     for i in range(n_points):
         # Create mask for current r bin
-        r_mask = (r > r_edges[i]) * (r < r_edges[i + 1])
+        radius_mask = (radius > radius_edges[i]) * \
+            (radius < radius_edges[i + 1])
 
         # Compute histogram of lnv2 values within the r bin and the vr mask
-        counts, lnv2_edges = numpy.histogram(lnv2[r_mask], bins=n_bins)
+        counts, lnv2_edges = numpy.histogram(
+            log_velocity_squared[radius_mask], bins=n_bins)
 
         # Compute the gradient of the histogram
         counts_gradient = numpy.gradient(
@@ -752,41 +1175,44 @@ def gradient_minima(
             counts_gradient, sigma_smooth)
 
         # Find the lnv2 value corresponding to the minimum of the smoothed gradient
-        lnv2_bins = 0.5 * (lnv2_edges[:-1] + lnv2_edges[1:])
-        counts_gradient_minima[i] = lnv2_bins[numpy.argmin(
+        log_velocity_squared_bins = 0.5 * (lnv2_edges[:-1] + lnv2_edges[1:])
+        counts_gradient_minima[i] = log_velocity_squared_bins[numpy.argmin(
             counts_gradient_smooth)]
 
         # Store diagnostics
-        lnv2_bins_out[i, :] = lnv2_bins
+        lnv2_bins_out[i, :] = log_velocity_squared_bins
         counts_out[i, :] = counts / numpy.max(counts)
         counts_gradient_out[i, :] = counts_gradient
         counts_gradient_smooth_out[i, :] = counts_gradient_smooth
 
     # Compute r bin centres
-    r_bins = 0.5 * (r_edges[:-1] + r_edges[1:])
+    radial_bins = 0.5 * (radius_edges[:-1] + radius_edges[1:])
 
     # Return diagnostics if requested
     if diagnostics:
-        return r_bins, counts_gradient_minima, \
+        return radial_bins, counts_gradient_minima, \
             (lnv2_bins_out, counts_out, counts_gradient_out, counts_gradient_smooth_out)
     else:
-        return r_bins, counts_gradient_minima
+        return radial_bins, counts_gradient_minima
 
 
 def self_calibration(
     n_seeds: int,
-    seed_data: tuple[numpy.ndarray],
+    seed_data: Tuple[numpy.ndarray],
     r_max: float,
     boxsize: float,
     minisize: float,
     save_path: str,
     particle_mass: float,
-    rhom: float,
+    mass_density: float,
     n_points: int = 20,
-    perc: float = 0.995,
+    percent: float = 0.995,
     width: float = 0.05,
-    grad_lims: tuple[float] = (0.2, 0.5),
+    gradient_radial_lims: Tuple[float] = (0.2, 0.5),
+    isolation_factor: float = 0.2,
+    isolation_radius_factor: float = 2.0,
     n_threads: int = None,
+    diagnostics: bool = True
 ) -> None:
     """Runs calibration from isolated halo samples.
 
@@ -821,7 +1247,7 @@ def self_calibration(
     n_threads : int
         Number of threads, by default None
     """
-    r, vr, lnv2 = get_calibration_data(
+    radius, radial_velocity, log_velocity_squared = get_calibration_data(
         n_seeds=n_seeds,
         seed_data=seed_data,
         r_max=r_max,
@@ -829,63 +1255,81 @@ def self_calibration(
         minisize=minisize,
         save_path=save_path,
         particle_mass=particle_mass,
-        mass_density=rhom,
+        mass_density=mass_density,
         n_threads=n_threads,
+        isolation_factor=isolation_factor,
+        isolation_radius_factor=isolation_radius_factor,
+        diagnostics=diagnostics,
     )
 
-    mask_vr_neg = (vr < 0)
-    mask_vr_pos = ~mask_vr_neg
-    mask_r = r <= 2.0
-    x0 = 0.5
+    mask_negative_vr = (radial_velocity < 0)
+    mask_positive_vr = ~mask_negative_vr
+    mask_low_radius = radius <= 2.0
+    radius_pivot = 0.5
+    def line_model(x, slope, abscissa): return slope * \
+        (x - radius_pivot) + abscissa
 
     # For vr > 0 ===============================================================
-    r_grad, min_grad = gradient_minima(r[mask_vr_pos], lnv2[mask_vr_pos], n_points,
-                                       *grad_lims)
+    radial_bins, gradient_minumum = _gradient_minima(
+        radius=radius[mask_positive_vr],
+        log_velocity_squared=log_velocity_squared[mask_positive_vr],
+        n_points=n_points,
+        r_min=gradient_radial_lims[0],
+        r_max=gradient_radial_lims[1],
+        diagnostics=diagnostics
+    )
     # Find slope by fitting to the minima.
-    popt, _ = curve_fit(lambda x, m, b: m * (x - x0) + b, r_grad, min_grad,
-                        p0=[-1, 2], bounds=((-5, 0), (0, 5)))
-    slope_pos, pivot_0 = popt
+    (slope_positive_vr, abscissa_p), _ = curve_fit(line_model, radial_bins, gradient_minumum,
+                                                   p0=[-1, 2], bounds=((-5, 0), (0, 5)))
 
     # Find intercept by finding the value that contains 'perc' percent of
     # particles below the line at fixed slope 'm_pos'.
     res = minimize(
-        fun=cost_percentile,
-        x0=1.1 * pivot_0,
-        bounds=((pivot_0, 5.0),),
-        args=(r[mask_vr_pos & mask_r],
-              lnv2[mask_vr_pos & mask_r], slope_pos, perc, x0),
+        fun=_cost_percentile,
+        x0=1.1 * abscissa_p,
+        bounds=((abscissa_p, 5.0),),
+        args=(radius[mask_positive_vr & mask_low_radius],
+              log_velocity_squared[mask_positive_vr & mask_low_radius],
+              slope_positive_vr, percent, radius_pivot),
         method='Nelder-Mead',
     )
-    b_pivot_pos = res.x[0]
+    abscissa_positive_vr = res.x[0]
 
     # For vr < 0 ===============================================================
-    r_grad, min_grad = gradient_minima(r[mask_vr_neg], lnv2[mask_vr_neg], n_points,
-                                       *grad_lims)
+    radial_bins, gradient_minumum = _gradient_minima(
+        radius=radius[mask_negative_vr],
+        log_velocity_squared=log_velocity_squared[mask_negative_vr],
+        n_points=n_points,
+        r_min=gradient_radial_lims[0],
+        r_max=gradient_radial_lims[1],
+        diagnostics=diagnostics
+    )
     # Find slope by fitting to the minima.
-    popt, _ = curve_fit(lambda x, m, b: m * (x - x0) + b, r_grad, min_grad,
-                        p0=[-1, 2], bounds=((-5, 0), (0, 3)))
-    slope_neg, pivot_1 = popt
+    (slope_negative_vr, abscissa_n), _ = curve_fit(line_model, radial_bins, gradient_minumum,
+                                                   p0=[-1, 2], bounds=((-5, 0), (0, 3)))
 
     # Find intercept by finding the value that maximizes the perpendicular
     # distance to the line at fixed slope of all points within a perpendicular
     # 'width' distance from the line (ignoring all others).
     res = minimize(
-        fun=cost_perp_distance,
-        x0=0.8 * pivot_1,
-        bounds=((0.5 * pivot_1, pivot_1),),
-        args=(r[mask_vr_neg], lnv2[mask_vr_neg], slope_neg, width, x0),
+        fun=_cost_perpendicular_distance,
+        x0=0.8 * abscissa_n,
+        bounds=((0.5 * abscissa_n, abscissa_n),),
+        args=(radius[mask_negative_vr], log_velocity_squared[mask_negative_vr],
+              slope_negative_vr, width, radius_pivot),
         method='Nelder-Mead',
     )
     b_pivot_neg = res.x[0]
 
-    b_neg = b_pivot_neg - slope_neg * x0
+    b_neg = b_pivot_neg - slope_negative_vr * radius_pivot
     gamma = 2.
-    alpha = (gamma - b_neg) / x0**2
-    beta = slope_neg - 2 * alpha * x0
+    alpha = (gamma - b_neg) / radius_pivot**2
+    beta = slope_negative_vr - 2 * alpha * radius_pivot
 
     with h5py.File(save_path + 'calibration_pars.hdf5', 'w') as hdf:
-        hdf.create_dataset('pos', data=[slope_pos, b_pivot_pos])
-        hdf.create_dataset('neg/line', data=[slope_neg, b_pivot_neg])
+        hdf.create_dataset(
+            'pos', data=[slope_positive_vr, abscissa_positive_vr])
+        hdf.create_dataset('neg/line', data=[slope_negative_vr, b_pivot_neg])
         hdf.create_dataset('neg/quad', data=[alpha, beta, gamma])
 
     return
