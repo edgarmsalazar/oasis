@@ -253,3 +253,128 @@ class TestFindIsolatedSeeds:
         
         assert len(isolated) <= 10
         assert all(isinstance(idx, (int, numpy.integer)) for idx in isolated)
+
+    
+class TestGroupSeedsByMinibox:
+    """Test suite for _group_seeds_by_minibox function."""
+
+    def test_basic_grouping(self):
+        """Test basic grouping of seeds into miniboxes."""
+        # Create seeds that will fall into different miniboxes
+        positions = numpy.array([
+            [5.0, 5.0, 5.0],   # Minibox (0,0,0)
+            [15.0, 5.0, 5.0],  # Minibox (1,0,0)
+            [5.0, 15.0, 5.0],  # Minibox (0,1,0)
+            [15.0, 15.0, 15.0] # Minibox (1,1,1)
+        ])
+        velocities = numpy.random.normal(0, 100, (4, 3))
+        
+        groups = calibration._group_seeds_by_minibox(
+            position=positions,
+            velocity=velocities,
+            boxsize=100.0,
+            minisize=10.0
+        )
+        
+        # Should have multiple groups
+        assert len(groups) > 1
+        
+        # Check that all seeds are accounted for
+        total_seeds = sum(len(pos) for pos, vel in groups.values())
+        assert total_seeds == 4
+        
+        # Check data structure
+        for minibox_id, (pos, vel) in groups.items():
+            assert isinstance(minibox_id, int)
+            assert pos.shape[1] == 3
+            assert vel.shape[1] == 3
+            assert pos.shape[0] == vel.shape[0]
+
+    def test_single_minibox(self):
+        """Test when all seeds fall into the same minibox."""
+        # All seeds within the same minibox
+        positions = numpy.random.uniform(0, 5, (10, 3))
+        velocities = numpy.random.normal(0, 100, (10, 3))
+        
+        groups = calibration._group_seeds_by_minibox(
+            position=positions,
+            velocity=velocities,
+            boxsize=100.0,
+            minisize=10.0
+        )
+        
+        # Should have only one group
+        assert len(groups) == 1
+        
+        # All seeds should be in this group
+        minibox_id, (pos, vel) = next(iter(groups.items()))
+        assert pos.shape[0] == 10
+        assert vel.shape[0] == 10
+
+    def test_empty_miniboxes_excluded(self):
+        """Test that empty miniboxes are not included in results."""
+        # Create sparse distribution of seeds
+        positions = numpy.array([
+            [5.0, 5.0, 5.0],   # One minibox
+            [95.0, 95.0, 95.0] # Distant minibox
+        ])
+        velocities = numpy.random.normal(0, 100, (2, 3))
+        
+        groups = calibration._group_seeds_by_minibox(
+            position=positions,
+            velocity=velocities,
+            boxsize=100.0,
+            minisize=10.0
+        )
+        
+        # Should have exactly 2 groups (no empty miniboxes)
+        assert len(groups) == 2
+        
+        # Each group should have exactly 1 seed
+        for pos, vel in groups.values():
+            assert len(pos) == 1
+
+    def test_large_number_seeds(self):
+        """Test grouping with a large number of seeds."""
+        n_seeds = 1000
+        positions = numpy.random.uniform(0, 100, (n_seeds, 3))
+        velocities = numpy.random.normal(0, 100, (n_seeds, 3))
+        
+        groups = calibration._group_seeds_by_minibox(
+            position=positions,
+            velocity=velocities,
+            boxsize=100.0,
+            minisize=20.0
+        )
+        
+        # Check that all seeds are accounted for
+        total_seeds = sum(len(pos) for pos, vel in groups.values())
+        assert total_seeds == n_seeds
+        
+        # Should have multiple groups
+        assert len(groups) > 1
+
+    @pytest.mark.parametrize(
+        "boxsize, minisize", 
+        [
+            (100.0, 10.0),   # 10x10x10 grid
+            (50.0, 12.5),    # 4x4x4 grid  
+            (200.0, 25.0),   # 8x8x8 grid
+        ],
+    )
+    def test_different_grid_sizes(self, boxsize, minisize):
+        """Test grouping with different grid configurations."""
+        n_seeds = 200
+        positions = numpy.random.uniform(0, boxsize, (n_seeds, 3))
+        velocities = numpy.random.normal(0, 100, (n_seeds, 3))
+        
+        groups = calibration._group_seeds_by_minibox(
+            position=positions,
+            velocity=velocities,
+            boxsize=boxsize,
+            minisize=minisize
+        )
+        
+        # All seeds should be accounted for
+        total_seeds = sum(len(pos) for pos, vel in groups.values())
+        assert total_seeds == n_seeds
