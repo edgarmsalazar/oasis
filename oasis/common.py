@@ -250,9 +250,10 @@ def _validate_inputs_coordinate_arrays(arr, name):
         raise ValueError(f"Input {name} must contain at least one particle")
 
     if (arr.ndim == 1 and arr.shape[0] != 3) or (arr.ndim == 2 and arr.shape[1] != 3) or \
-        len(arr.shape) > 2:
-        raise ValueError(f"Input {name} must have shape (3,) or (n_particles, 3)")
-    
+            len(arr.shape) > 2:
+        raise ValueError(
+            f"Input {name} must have shape (3,) or (n_particles, 3)")
+
 
 def _validate_inputs_existing_path(path):
     """Validate that a path exists and is a directory."""
@@ -265,7 +266,7 @@ def _validate_inputs_existing_path(path):
     if not path.is_dir():
         raise NotADirectoryError(f"Path is not a directory: {path}")
 
-    
+
 def _validate_inputs_boxsize_minisize(boxsize, minisize):
     """Validate boxsize and minize and raise appropriate errors."""
     # Validate both are positive numbers
@@ -284,7 +285,7 @@ def _validate_inputs_mini_box_id(mini_box_id, cells_per_side):
     # Check mini_box_id is an integer
     if not isinstance(mini_box_id, (int, numpy.integer)):
         raise TypeError("mini_box_id must be an integer")
-    
+
     if mini_box_id < 0:
         raise ValueError("mini_box_id must be zero or positive")
 
@@ -350,7 +351,8 @@ def _validate_inputs_load(
 ) -> None:
     """Validate inputs for load functions."""
     # Validate mini_box_id
-    _validate_inputs_mini_box_id(mini_box_id, int(numpy.ceil(boxsize / minisize)))
+    _validate_inputs_mini_box_id(
+        mini_box_id, int(numpy.ceil(boxsize / minisize)))
 
     # Validate boxsize and minisize
     _validate_inputs_boxsize_minisize(boxsize, minisize)
@@ -360,6 +362,29 @@ def _validate_inputs_load(
 
     # Validate padding
     _validate_inputs_positive_number(padding, "padding")
+
+
+def _validate_inputs_seed_data(seed_data):
+    """Validate inputs for functions taking seed data."""
+    if len(seed_data) != 5:
+        raise ValueError("seed_data must be a tuple of 5 elements")
+
+    id, position, velocity, mass, radius = seed_data
+
+    _validate_inputs_coordinate_arrays(position, "seed positions")
+    _validate_inputs_coordinate_arrays(velocity, "seed velocities")
+
+    if not (len(id) == len(position) == len(velocity) == len(mass) == len(radius)):
+        raise ValueError("All elements in seed_data must have the same length")
+
+    n_items = len(id)
+    if n_items == 1:
+        if not (isinstance(id, (int, numpy.integer)) and id > 0):
+            raise TypeError("Seed IDs must be a positive integer")
+    else:
+        if not (all(isinstance(item, (int, numpy.integer)) for item in id) and
+                all(item > 0 for item in id)):
+            raise TypeError("Seed IDs must be positive integers")
 
 
 ###
