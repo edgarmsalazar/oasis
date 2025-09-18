@@ -374,10 +374,8 @@ def _validate_inputs_seed_data(seed_data):
     _validate_inputs_coordinate_arrays(position, "seed positions")
     _validate_inputs_coordinate_arrays(velocity, "seed velocities")
 
-    if not (len(id) == len(position) == len(velocity) == len(mass) == len(radius)):
-        raise ValueError("All elements in seed_data must have the same length")
-
-    n_items = len(id)
+    # Check ids are positive integers
+    n_items = len(position)
     if n_items == 1:
         if not (isinstance(id, (int, numpy.integer)) and id > 0):
             raise TypeError("Seed IDs must be a positive integer")
@@ -385,6 +383,16 @@ def _validate_inputs_seed_data(seed_data):
         if not (all(isinstance(item, (int, numpy.integer)) for item in id) and
                 all(item > 0 for item in id)):
             raise TypeError("Seed IDs must be positive integers")
+    
+    # Check all inputs have the same number of elements
+    if n_items == 1:
+        id = numpy.asarray(id)
+        mass = numpy.asarray(mass)
+        radius = numpy.asarray(radius)
+
+    if not (id.size == mass.size == radius.size == len(position) == len(velocity)):
+        raise ValueError("All elements in seed_data must have the same length")
+
 
 
 ###

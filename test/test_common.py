@@ -849,12 +849,23 @@ class TestValidateInputsSeedData:
         position = numpy.random.rand(n_seeds, 3) * 100.0
         velocity = numpy.random.randn(n_seeds, 3) * 1000.0
         mass = numpy.random.rand(n_seeds) * 1e15
+        radius = (3. * mass / 4. / numpy.pi / 200. / 0.3 / 2.77e11)**(1./3.)
+        return id, position, velocity, mass, radius
+    
+    @pytest.fixture
+    def valid_seed_data_single(self):
+        """Fixture providing valid seed data."""
+        id = 1
+        position = numpy.empty((1, 3))
+        velocity = numpy.empty((1, 3))
+        mass = 1e15
         radius = numpy.power(3. * mass / 4. / numpy.pi / 200. / 0.3 / 2.77e11, 1./3.)
         return id, position, velocity, mass, radius
 
-    def test_valid_inputs(self, valid_seed_data):
+    def test_valid_inputs(self, valid_seed_data, valid_seed_data_single):
         """Test that valid inputs don't raise exceptions."""
         common._validate_inputs_seed_data(valid_seed_data)
+        common._validate_inputs_seed_data(valid_seed_data_single)
 
     def test_ids_not_integer(self, valid_seed_data):
         """Test that non-integer ids raise TypeError."""
