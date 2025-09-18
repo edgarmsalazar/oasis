@@ -418,6 +418,14 @@ def _find_isolated_seeds(
     _validate_inputs_positive_number(
         isolation_radius_factor, 'isolation_radius_factor')
 
+    # This should never be needed as all seeds are assumed to have different 
+    # masses and radii. But just in case.
+    if isinstance(mass, (int, float)):
+        mass = numpy.full(position.shape[0], mass)
+    
+    if isinstance(radius, (int, float)):
+        radius = numpy.full(position.shape[0], radius)
+
     n_seeds = position.shape[0]
     isolated_indices = []
 
