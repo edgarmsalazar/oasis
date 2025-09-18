@@ -1,10 +1,11 @@
 import os
-from functools import partial
 from multiprocessing import Pool
-from typing import Tuple
+from typing import Dict, Tuple, Union
 
 import h5py
 import numpy
+from matplotlib import pyplot
+from matplotlib.colorbar import ColorbarBase
 from scipy.ndimage import gaussian_filter1d
 from scipy.optimize import curve_fit, minimize
 from tqdm import tqdm
@@ -13,7 +14,8 @@ from oasis.common import (G_GRAVITY, _validate_inputs_boxsize_minisize,
                           _validate_inputs_coordinate_arrays,
                           _validate_inputs_existing_path,
                           _validate_inputs_mini_box_id,
-                          _validate_inputs_positive_number)
+                          _validate_inputs_positive_number,
+                          _validate_inputs_seed_data)
 from oasis.coordinates import relative_coordinates, velocity_components
 from oasis.minibox import get_mini_box_id, load_particles
 
@@ -23,14 +25,19 @@ __all__ = [
     'calibrate',
 ]
 
+# Label sizes
+SIZE_TICKS: int = 12
+SIZE_LEGEND: int = 14
+SIZE_LABELS: int = 16
+
 
 def _compute_r200m_and_v200m(
-    radial_distances: numpy.ndarray, 
-    particle_mass: float, 
+    radial_distances: numpy.ndarray,
+    particle_mass: float,
     mass_density: float
 ) -> Tuple[float, float]:
     """Compute virial radius R200m and circular velocity V200 for a halo.
-    
+
     This function calculates the virial properties of a halo by analyzing the
     radial density profile. R200m is defined as the radius at which the mean
     enclosed density equals 200 times the mean matter density of the universe.
@@ -47,7 +54,7 @@ def _compute_r200m_and_v200m(
     mass_density : float
         Mean matter density of the universe in simulation units
         (typically M_sun/Mpc^3). Must be positive.
-        
+
     Returns
     -------
     r200m : float
@@ -55,7 +62,7 @@ def _compute_r200m_and_v200m(
     v200_squared : float
         Square of circular velocity V200² in (simulation_units)². Returns 0.0
         if computation fails.
-        
+
     Raises
     ------
     TypeError
@@ -80,12 +87,12 @@ def _compute_r200m_and_v200m(
     >>> distances = numpy.array([0.1, 0.2, 0.3, 0.5, 0.8, 1.2])
     >>> r200m, v200_sq = _compute_r200m_and_v200(distances, 1e10, 2.78e11)
     >>> print(f"R200m = {r200m:.3f} Mpc, V200 = {numpy.sqrt(v200_sq):.1f} km/s")
-    
+
     >>> # Handle edge case with no particles
     >>> r200m, v200_sq = _compute_r200m_and_v200(numpy.array([]), 1e10, 2.78e11)
     >>> print(f"Empty input: R200m = {r200m}, V200² = {v200_sq}")
     Empty input: R200m = 0.0, V200² = 0.0
-        
+
     See Also
     --------
     G_GRAVITY : Gravitational constant used in V200 computation
@@ -94,27 +101,27 @@ def _compute_r200m_and_v200m(
     _validate_inputs_coordinate_arrays(radial_distances, 'radial_distances')
     _validate_inputs_positive_number(particle_mass, 'particle_mass')
     _validate_inputs_positive_number(mass_density, 'mass_density')
-    
+
     # Sort distances for cumulative mass profile
     sorted_distances = numpy.sort(radial_distances)
     n_particles = len(sorted_distances)
-    
+
     # Avoid division by zero for particles at the center
     # Replace zero distances with a small value
     min_distance = numpy.finfo(float).eps
     sorted_distances = numpy.maximum(sorted_distances, min_distance)
-    
+
     # Compute cumulative mass profile
     mass_profile = particle_mass * numpy.arange(1, n_particles + 1)
-    
+
     # Compute volume-averaged densities
     volumes = (4.0 / 3.0) * numpy.pi * sorted_distances**3
     densities = mass_profile / volumes
-    
+
     # Find where density drops below 200 * mass_density
     target_density = 200.0 * mass_density
     mask_above_target = densities >= target_density
-    
+
     if not numpy.any(mask_above_target):
         # If no particles satisfy criterion, use outermost particle
         r200m = sorted_distances[-1]
@@ -124,7 +131,7 @@ def _compute_r200m_and_v200m(
         last_valid_idx = numpy.where(mask_above_target)[0][-1]
         r200m = sorted_distances[last_valid_idx]
         m200m = mass_profile[last_valid_idx]
-    
+
     # Compute V200² with safety check
     if r200m > 0 and m200m > 0:
         v200_squared = G_GRAVITY * m200m / r200m
@@ -132,7 +139,7 @@ def _compute_r200m_and_v200m(
             v200_squared = 0.0
     else:
         v200_squared = 0.0
-        
+
     return float(r200m), float(v200_squared)
 
 
@@ -195,7 +202,7 @@ def _get_candidate_particle_data(
         - Column 0: r/R200m - Radial distance scaled by R200m
         - Column 1: vr/V200 - Radial velocity scaled by V200  
         - Column 2: ln(v²/V200²) - Natural log of velocity squared scaled by V200²
-        
+
         If no valid particles are found, returns empty array with shape (0, 3).
 
     Raises
@@ -261,16 +268,18 @@ def _get_candidate_particle_data(
         load_particles(mini_box_id, boxsize, minisize, save_path)
 
     # Iterate over seeds in current mini box.
-    radius, radial_velocity, log_velocity_sq = ([] for _ in range(3))
+    radius, radial_velocity, log_velocity_squared = ([] for _ in range(3))
     for position_seed_i, velocity_seed_i in zip(position_seeds, velocity_seeds):
         # Find particles within r_max of the seed
-        relative_position = relative_coordinates(position_particles, position_seed_i, boxsize)
-        mask_close = numpy.prod(numpy.abs(relative_position) <= r_max, axis=1, dtype=bool)
+        relative_position = relative_coordinates(
+            position_particles, position_seed_i, boxsize)
+        mask_close = numpy.prod(
+            numpy.abs(relative_position) <= r_max, axis=1, dtype=bool)
 
         # Apply mask
         relative_position = relative_position[mask_close]
         relative_velocity = velocity_particles[mask_close] - velocity_seed_i
-        
+
         # Compute radial distance (L2 norm). No need to further filter by r_max
         # since we already applied a cubic mask.
         rps = numpy.linalg.norm(relative_position, axis=1)
@@ -279,8 +288,9 @@ def _get_candidate_particle_data(
         vrp, _, v2p = velocity_components(relative_position, relative_velocity)
 
         # Compute R200m and M200m
-        r200m, v200m_sq = _compute_r200m_and_v200m(rps, particle_mass, mass_density)
-        
+        r200m, v200m_sq = _compute_r200m_and_v200m(
+            rps, particle_mass, mass_density)
+
         # Append rescaled quantities to containers
         radius.append(rps / r200m)
         radial_velocity.append(vrp / numpy.sqrt(v200m_sq))
@@ -289,14 +299,95 @@ def _get_candidate_particle_data(
         v_sq_ratio = v2p / v200m_sq
         v_sq_ratio = numpy.maximum(v_sq_ratio, 1e-10)
 
-        log_velocity_sq.append(numpy.log(v_sq_ratio))
-    
+        log_velocity_squared.append(numpy.log(v_sq_ratio))
+
     # Concatenate arrays
     radius = numpy.concatenate(radius)
     radial_velocity = numpy.concatenate(radial_velocity)
-    log_velocity_sq = numpy.concatenate(log_velocity_sq)
+    log_velocity_squared = numpy.concatenate(log_velocity_squared)
 
-    return numpy.vstack([radius, radial_velocity, log_velocity_sq])
+    return numpy.vstack([radius, radial_velocity, log_velocity_squared])
+
+
+def _find_isolated_seeds(
+    position: numpy.ndarray,
+    mass: Union[float, numpy.ndarray],
+    radius: Union[float, numpy.ndarray],
+    max_seeds: int,
+    boxsize: float,
+    isolation_factor: float = 0.2,
+    isolation_radius_factor: float = 2.0,
+) -> numpy.ndarray:
+    """"""
+    # Input validation
+    _validate_inputs_coordinate_arrays(position, 'position')
+    _validate_inputs_positive_number(max_seeds, 'max_seeds')
+    _validate_inputs_positive_number(boxsize, 'boxsize')
+    _validate_inputs_positive_number(isolation_factor, 'isolation_factor')
+    _validate_inputs_positive_number(
+        isolation_radius_factor, 'isolation_radius_factor')
+
+    n_seeds = position.shape[0]
+    isolated_indices = []
+
+    # Pre-compute isolation radii for efficiency
+    isolation_radii = isolation_radius_factor * radius
+    max_neighbor_masses = isolation_factor * mass
+
+    for i in range(n_seeds):
+        # If all requested isolated seeds have been found, exit loop
+        if len(isolated_indices) >= max_seeds:
+            break
+
+        current_position = position[i]
+        isolation_radius = isolation_radii[i]
+        max_neighbor_mass = max_neighbor_masses[i]
+
+        # Find neighboring seeds within isolation radius using periodic BC
+        rel_positions = relative_coordinates(position, current_position,
+                                             boxsize, periodic=True)
+        distances = numpy.linalg.norm(rel_positions, axis=1)
+
+        # Exclude self (distance = 0) and find neighbors within isolation radius
+        neighbor_mask = (distances > 0) & (distances <= isolation_radius)
+
+        # No neighbors found - seed is isolated
+        if not numpy.any(neighbor_mask):
+            isolated_indices.append(i)
+            continue
+
+        neighbor_masses = mass[neighbor_mask]
+
+        # Check isolation criterion: all neighbors must have mass < threshold
+        if numpy.all(neighbor_masses < max_neighbor_mass):
+            isolated_indices.append(i)
+
+    return numpy.array(isolated_indices)
+
+
+def _group_seeds_by_minibox(
+    position: numpy.ndarray,
+    velocity: numpy.ndarray,
+    boxsize: float,
+    minisize: float,
+) -> Dict[int, Tuple[numpy.ndarray, numpy.ndarray]]:
+    """"""
+    # Validate inputs
+    _validate_inputs_coordinate_arrays(position, 'position')
+    _validate_inputs_coordinate_arrays(velocity, 'velocity')
+    _validate_inputs_boxsize_minisize(boxsize, minisize)
+
+    # Get mini-box IDs for all seeds
+    mini_box_ids = get_mini_box_id(position, boxsize, minisize)
+
+    # Group by minibox ID using dictionary comprehension
+    unique_ids = numpy.unique(mini_box_ids)
+    minibox_groups = {}
+    for minibox_id in unique_ids:
+        mask = mini_box_ids == minibox_id
+        minibox_groups[int(minibox_id)] = (position[mask], velocity[mask])
+
+    return minibox_groups
 
 
 def _select_candidate_seeds(
@@ -308,6 +399,8 @@ def _select_candidate_seeds(
     save_path: str,
     particle_mass: float,
     mass_density: float,
+    isolation_factor: float = 0.2,
+    isolation_radius_factor: float = 2.0,
     n_threads: int = None,
 ) -> tuple[numpy.ndarray]:
     """Locates for the largest `M_200b` seeds and searches for all the particles
@@ -342,90 +435,137 @@ def _select_candidate_seeds(
         Radial distance, radial velocity, and log of the square of the velocity 
         in units of R200m and M200m.
     """
-    # Load seed data
-    hid, pos_seed, vel_seed, m200b, r200b  = seed_data
+    # Validate inputs
+    _validate_inputs_positive_number(n_seeds, 'n_seeds')
+    _validate_inputs_seed_data(seed_data)
+    _validate_inputs_positive_number(r_max, 'r_max')
+    _validate_inputs_existing_path(save_path)
+    _validate_inputs_boxsize_minisize(boxsize, minisize)
+    _validate_inputs_positive_number(particle_mass, 'particle_mass')
+    _validate_inputs_positive_number(mass_density, 'mass_density')
+    if n_threads is not None:
+        _validate_inputs_positive_number(n_threads, 'n_threads')
+
+    # Unpack seed data
+    position, velocity, mass, radius = seed_data
 
     # Rank order by mass.
-    order = numpy.argsort(-m200b)
-    hid = hid[order]
-    pos_seed = pos_seed[order]
-    vel_seed = vel_seed[order]
-    r200b = r200b[order]
-    m200b = m200b[order]
+    order = numpy.argsort(-mass)
+    position = position[order]
+    velocity = velocity[order]
+    radius = radius[order]
+    mass = mass[order]
 
-    # Search for eligible seeds.
-    # A seed is considered eligible if it dominates its own environment. This is
-    # enforced by requiring that the next most-massive seed within 2*R200 is, at
-    # least five times smaller than the seed, i.e. has a mass <= 20% of M200.
-    # The loop will stop once it has found `n_seeds` eligible seeds.
-    # NOTE: When using multiple threads, this is the part that takes most of the
-    # execution time and scales with the number of candidate seeds requested.
-    seed_i = []
-    i = 0
-    # print('Looking for candidate seeds...')
-    while len(seed_i) < n_seeds:
-        # Exit the loop if there are no more seeds in the list.
-        if i >= len(hid)-1: 
-            print(f'Only found {i}/{n_seeds} seeds.')
-            break
-        mask_close = numpy.prod(numpy.abs(pos_seed - pos_seed[i]) <=  2.*r200b[i],
-                             axis=1, dtype=bool)
-        mask_self = m200b != m200b[i]
-        if numpy.all(m200b[mask_close & mask_self] < (0.2 * m200b[i])):
-            seed_i.append(i)
-        i += 1
-    # print(f'Found candidate seeds.')
+    # Search for eligible (isolated) seeds.
+    isolated_indices = _find_isolated_seeds(position, mass, radius, n_seeds,
+                                            boxsize, isolation_factor,
+                                            isolation_radius_factor)
 
-    hid = hid[seed_i]
-    pos_seed = pos_seed[seed_i]
-    vel_seed = vel_seed[seed_i]
+    # Select only the candidate seeds.
+    position = position[isolated_indices]
+    velocity = velocity[isolated_indices]
 
-    # Locate mini box IDs for all seeds.
-    seed_mini_box_id = get_mini_box_id(pos_seed, boxsize, minisize)
-    # Sort by mini box ID
-    order = numpy.argsort(seed_mini_box_id)
-    seed_mini_box_id = seed_mini_box_id[order]
-    hid = hid[order]
-    pos_seed = pos_seed[order]
-    vel_seed = vel_seed[order]
+    # Group seeds by minibox for efficient processing
+    minibox_groups = _group_seeds_by_minibox(
+        position, velocity, boxsize, minisize)
 
-    # Get unique mini box ids
-    unique_mini_box_ids = numpy.unique(seed_mini_box_id)
-    n_unique = len(unique_mini_box_ids)
-
-    pos_unique = [
-        pos_seed[seed_mini_box_id == mini_box_id] 
-        for mini_box_id in unique_mini_box_ids
-    ]
-    vel_unique = [
-        vel_seed[seed_mini_box_id == mini_box_id] 
-        for mini_box_id in unique_mini_box_ids
-    ]
-
-    func = partial(_get_candidate_particle_data, r_max=r_max, boxsize=boxsize, 
-                   minisize=minisize, save_path=save_path, particle_mass=particle_mass, 
-                   rhom=mass_density)
-    
-    # Cap the number of threads to the total number of miniboxes to process.
-    if not n_threads:
-        n_threads = numpy.min([os.cpu_count()-10, n_unique])
+    # Cap the number of threads to the total number of miniboxes to process
+    n_miniboxes = len(minibox_groups)
+    if n_threads is None:
+        n_threads = min(max(1, os.cpu_count()//2), n_miniboxes)
     else:
-        n_threads = numpy.min([n_threads, n_unique])
+        n_threads = min(n_threads, n_miniboxes)
+    print(f"Processing {n_miniboxes} miniboxes using {n_threads} threads...")
 
-    data = zip(unique_mini_box_ids, pos_unique, vel_unique)
-    out = []
-    with Pool(n_threads) as pool, \
-        tqdm(total=n_unique, colour="blue", ncols=100,
-             desc='Processing candidates') as pbar:
-        # The 
-        for res in pool.starmap(func, data):
-            out.append(res)
-            pbar.update()
-            pbar.refresh()
-    out = numpy.concatenate(out, axis=1).T
+    # Set up multiprocessing
+    processing_args = [
+        (minibox_id, position_group, velocity_group, r_max, boxsize, minisize,
+         save_path, particle_mass, mass_density)
+        for minibox_id, (position_group, velocity_group) in minibox_groups.items()
+    ]
 
-    # Return an array where each column corresponds to r, vr, lnv2 respectively
-    return out
+    results = []
+    # Safely handle multiprocessing falure with a fall back to a single thread.
+    if n_threads > 1 and n_miniboxes > 1:
+        try:
+            with Pool(n_threads) as pool, tqdm(total=n_miniboxes, colour="blue",
+                                               desc='Processing candidates',
+                                               ncols=100) as pbar:
+                for result in pool.starmap(_get_candidate_particle_data, processing_args):
+                    results.append(result)
+                    pbar.update()
+        except Exception as e:
+            print(
+                f"Warning: Parallel processing failed ({e}), falling back to sequential")
+            # Fall back to sequential processing
+            n_threads = 1
+
+    if n_threads == 1:
+        for args in tqdm(processing_args, desc='Processing miniboxes',
+                         colour='blue', ncols=100):
+            result = _get_candidate_particle_data(*args)
+            results.append(result)
+
+    results = numpy.concatenate(results, axis=1).T
+
+    return results
+
+
+def _diagnostic_calibration_data_plot(
+    save_path: str,
+    radius: numpy.ndarray,
+    radial_velocity: numpy.ndarray,
+    log_velocity_squared: numpy.ndarray,
+) -> None:
+
+    pyplot.rcParams.update({
+        "text.usetex": True,
+        "font.family": "serif",
+        "figure.dpi": 150,
+    })
+
+    cmap = 'terrain'
+    limits = ((0, 2), (-2, 2.5))
+
+    mask_negative_vr = (radial_velocity < 0)
+    mask_positive_vr = ~mask_negative_vr
+
+    fig, axes = pyplot.subplots(2, 2, figsize=(8, 8))
+    axes = axes.flatten()
+
+    for ax in axes:
+        ax.set_xlabel(r'$r/R_{\rm 200m}$', fontsize=SIZE_LABELS)
+        ax.set_ylabel(r'$\ln(v^2/v_{\rm 200m}^2)$', fontsize=SIZE_LABELS)
+        ax.set_xlim(*limits[0])
+        ax.set_ylim(*limits[1])
+        ax.tick_params(axis="both", which="major", labelsize=SIZE_TICKS)
+
+    # Create a color bar to display mass ranges.
+    cax = fig.add_axes([1.01, 0.2, 0.01, 0.7])
+    cbar = ColorbarBase(cax, cmap=cmap, orientation="vertical", extend='max')
+    cbar.set_label(r'Counts', fontsize=SIZE_LEGEND)
+    cbar.set_ticklabels([], fontsize=SIZE_TICKS)
+    cbar.ax.tick_params(size=0, labelleft=False, labelright=False, 
+                        labeltop=False, labelbottom=False)
+
+    pyplot.sca(axes[0])
+    pyplot.title(r'$v_r > 0$', fontsize=SIZE_LABELS)
+    pyplot.hist2d(radius[mask_positive_vr], 
+                  log_velocity_squared[mask_positive_vr], 
+                  bins=200, cmap=cmap, range=limits)
+    pyplot.legend(fontsize=SIZE_LEGEND)
+
+    pyplot.sca(axes[1])
+    pyplot.title(r'$v_r < 0$', fontsize=SIZE_LABELS)
+    pyplot.hist2d(radius[mask_negative_vr], 
+                  log_velocity_squared[mask_negative_vr], 
+                  bins=200, cmap=cmap, range=limits)
+    pyplot.legend(fontsize=SIZE_LEGEND)
+
+    pyplot.tight_layout()
+    pyplot.savefig(save_path + 'calibration_data.png', dpi=300)
+
+    return None
 
 
 def get_calibration_data(
@@ -437,7 +577,10 @@ def get_calibration_data(
     save_path: str,
     particle_mass: float,
     mass_density: float,
+    isolation_factor: float = 0.2,
+    isolation_radius_factor: float = 2.0,
     n_threads: int = None,
+    diagnostic: bool = True,
 ) -> Tuple[numpy.ndarray]:
     """_summary_
 
@@ -446,7 +589,7 @@ def get_calibration_data(
     n_seeds : int
         Number of seeds to process
     seed_data : tuple[numpy.ndarray]
-        Tuple with seed ID, positions, velocities, M200b and R200b.
+        Tuple with seed positions, velocities, M200b and R200b.
     r_max : float
         Maximum distance to consider
     boxsize : float
@@ -470,12 +613,11 @@ def get_calibration_data(
     file_name = save_path + 'calibration_data.hdf5'
     try:
         with h5py.File(file_name, 'r') as hdf:
-            r = hdf['r'][()]
-            vr = hdf['vr'][()]
-            lnv2 = hdf['lnv2'][()]
-        return r, vr, lnv2
+            radius = hdf['r'][()]
+            radial_velocity = hdf['vr'][()]
+            log_velocity_squared = hdf['lnv2'][()]
     except:
-        out = _select_candidate_seeds(
+        results = _select_candidate_seeds(
             n_seeds=n_seeds,
             seed_data=seed_data,
             r_max=r_max,
@@ -484,16 +626,29 @@ def get_calibration_data(
             save_path=save_path,
             particle_mass=particle_mass,
             mass_density=mass_density,
+            isolation_factor=isolation_factor,
+            isolation_radius_factor=isolation_radius_factor,
             n_threads=n_threads,
         )
 
+        radius = results[:, 0]
+        radial_velocity = results[:, 1]
+        log_velocity_squared = results[:, 2]
+
         with h5py.File(file_name, 'w') as hdf:
-            hdf.create_dataset('r', data=out[:, 0])
-            hdf.create_dataset('vr', data=out[:, 1])
-            hdf.create_dataset('lnv2', data=out[:, 2])
+            hdf.create_dataset('r', data=radius)
+            hdf.create_dataset('vr', data=radial_velocity)
+            hdf.create_dataset('lnv2', data=log_velocity_squared)
 
-        return out[:, 0], out[:, 1], out[:, 2]
+    if diagnostic:
+        _diagnostic_calibration_data_plot(
+            save_path=save_path,
+            radius=radius,
+            radial_velocity=radial_velocity,
+            log_velocity_squared=log_velocity_squared
+        )
 
+    return radius, radial_velocity, log_velocity_squared
 
 
 def cost_percentile(b: float, *data) -> float:
@@ -529,7 +684,7 @@ def cost_perp_distance(b: float, *data) -> float:
         A tuple with `[r, lnv2, slope, width]`, where `slope` is the slope of 
         the line and is fixed, and `width` is the width of a band around the 
         line within which the distance is computed
-        
+
     Returns
     -------
     float
@@ -580,31 +735,34 @@ def gradient_minima(
     counts_out = numpy.zeros((n_points, n_bins))
     counts_gradient_out = numpy.zeros((n_points, n_bins))
     counts_gradient_smooth_out = numpy.zeros((n_points, n_bins))
-    
+
     for i in range(n_points):
         # Create mask for current r bin
         r_mask = (r > r_edges[i]) * (r < r_edges[i + 1])
 
         # Compute histogram of lnv2 values within the r bin and the vr mask
         counts, lnv2_edges = numpy.histogram(lnv2[r_mask], bins=n_bins)
-        
+
         # Compute the gradient of the histogram
-        counts_gradient = numpy.gradient(counts, numpy.mean(numpy.diff(lnv2_edges)))
+        counts_gradient = numpy.gradient(
+            counts, numpy.mean(numpy.diff(lnv2_edges)))
         counts_gradient /= numpy.max(numpy.abs(counts_gradient))
-        
+
         # Smooth the gradient
-        counts_gradient_smooth = gaussian_filter1d(counts_gradient, sigma_smooth)
-        
+        counts_gradient_smooth = gaussian_filter1d(
+            counts_gradient, sigma_smooth)
+
         # Find the lnv2 value corresponding to the minimum of the smoothed gradient
         lnv2_bins = 0.5 * (lnv2_edges[:-1] + lnv2_edges[1:])
-        counts_gradient_minima[i] = lnv2_bins[numpy.argmin(counts_gradient_smooth)]
+        counts_gradient_minima[i] = lnv2_bins[numpy.argmin(
+            counts_gradient_smooth)]
 
         # Store diagnostics
         lnv2_bins_out[i, :] = lnv2_bins
         counts_out[i, :] = counts / numpy.max(counts)
         counts_gradient_out[i, :] = counts_gradient
         counts_gradient_smooth_out[i, :] = counts_gradient_smooth
-    
+
     # Compute r bin centres
     r_bins = 0.5 * (r_edges[:-1] + r_edges[1:])
 
@@ -682,10 +840,10 @@ def self_calibration(
     x0 = 0.5
 
     # For vr > 0 ===============================================================
-    r_grad, min_grad = gradient_minima(r[mask_vr_pos], lnv2[mask_vr_pos], n_points, 
+    r_grad, min_grad = gradient_minima(r[mask_vr_pos], lnv2[mask_vr_pos], n_points,
                                        *grad_lims)
     # Find slope by fitting to the minima.
-    popt, _ = curve_fit(lambda x, m, b: m * (x - x0) + b, r_grad, min_grad, 
+    popt, _ = curve_fit(lambda x, m, b: m * (x - x0) + b, r_grad, min_grad,
                         p0=[-1, 2], bounds=((-5, 0), (0, 5)))
     slope_pos, pivot_0 = popt
 
@@ -695,16 +853,17 @@ def self_calibration(
         fun=cost_percentile,
         x0=1.1 * pivot_0,
         bounds=((pivot_0, 5.0),),
-        args=(r[mask_vr_pos&mask_r], lnv2[mask_vr_pos&mask_r], slope_pos, perc, x0),
+        args=(r[mask_vr_pos & mask_r],
+              lnv2[mask_vr_pos & mask_r], slope_pos, perc, x0),
         method='Nelder-Mead',
     )
     b_pivot_pos = res.x[0]
 
     # For vr < 0 ===============================================================
-    r_grad, min_grad = gradient_minima(r[mask_vr_neg], lnv2[mask_vr_neg], n_points, 
+    r_grad, min_grad = gradient_minima(r[mask_vr_neg], lnv2[mask_vr_neg], n_points,
                                        *grad_lims)
     # Find slope by fitting to the minima.
-    popt, _ = curve_fit(lambda x, m, b: m * (x - x0) + b, r_grad, min_grad, 
+    popt, _ = curve_fit(lambda x, m, b: m * (x - x0) + b, r_grad, min_grad,
                         p0=[-1, 2], bounds=((-5, 0), (0, 3)))
     slope_neg, pivot_1 = popt
 
@@ -719,12 +878,11 @@ def self_calibration(
         method='Nelder-Mead',
     )
     b_pivot_neg = res.x[0]
-    
+
     b_neg = b_pivot_neg - slope_neg * x0
     gamma = 2.
     alpha = (gamma - b_neg) / x0**2
     beta = slope_neg - 2 * alpha * x0
-    
 
     with h5py.File(save_path + 'calibration_pars.hdf5', 'w') as hdf:
         hdf.create_dataset('pos', data=[slope_pos, b_pivot_pos])
@@ -735,8 +893,8 @@ def self_calibration(
 
 
 def calibrate(
-    save_path: str, 
-    omega_m: float = None, 
+    save_path: str,
+    omega_m: float = None,
     **kwargs,
 ) -> None:
     """Calibrates finder by assuming cosmology dependence. If `omega_m` is 

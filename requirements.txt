@@ -5,3 +5,4 @@ scipy
 h5py
 tqdm
 pytest
+matplotlib
