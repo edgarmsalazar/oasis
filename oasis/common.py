@@ -79,7 +79,12 @@ def timer(
         finally:
             finish_time = datetime.now()
             elapsed = perf_counter() - perf_start
-            elapsed_str = f"{elapsed:.{precision}f}s"
+
+            hours = int(elapsed // 3600)
+            remaining_seconds = elapsed % 3600
+            minutes = int(remaining_seconds // 60)
+            seconds = remaining_seconds % 60
+            elapsed_str = f"{hours:02d}:{minutes:02d}:{seconds:.{precision}f}"
 
             if fancy:
                 print(
