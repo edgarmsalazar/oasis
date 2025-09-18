@@ -841,9 +841,29 @@ def _diagnostic_calibration_data_plot(
 
     cmap = 'terrain'
     limits = ((0, 2), (-2, 2.5))
+    levels = 80
 
     mask_negative_vr = (radial_velocity < 0)
     mask_positive_vr = ~mask_negative_vr
+
+    # Compute counts histograms for top two panels
+    x_mesh_positive, y_mesh_positive, z_positive = \
+        _hist2d_mesh(radius[mask_positive_vr],
+                     log_velocity_squared[mask_positive_vr],
+                     limits=limits,
+                     n_bins=200,
+                     gradient=False,
+                     )
+    z_positive = _smooth_2d_hist(z_positive)
+
+    x_mesh_negative, y_mesh_negative, z_negative = \
+        _hist2d_mesh(radius[mask_negative_vr],
+                     log_velocity_squared[mask_negative_vr],
+                     limits=limits,
+                     n_bins=200,
+                     gradient=False,
+                     )
+    z_negative = _smooth_2d_hist(z_negative)
 
     fig, axes = pyplot.subplots(1, 2, figsize=(8, 4.2))
     fig.suptitle('Calibration data', fontsize=SIZE_LABELS)
@@ -866,15 +886,13 @@ def _diagnostic_calibration_data_plot(
 
     pyplot.sca(axes[0])
     pyplot.title(r'$v_r > 0$', fontsize=SIZE_LABELS)
-    pyplot.hist2d(radius[mask_positive_vr],
-                  log_velocity_squared[mask_positive_vr],
-                  bins=200, cmap=cmap, range=limits)
+    pyplot.contourf(x_mesh_positive, y_mesh_positive, z_positive.T,
+                    levels=levels, cmap=cmap)
 
     pyplot.sca(axes[1])
     pyplot.title(r'$v_r < 0$', fontsize=SIZE_LABELS)
-    pyplot.hist2d(radius[mask_negative_vr],
-                  log_velocity_squared[mask_negative_vr],
-                  bins=200, cmap=cmap, range=limits)
+    pyplot.contourf(x_mesh_negative, y_mesh_negative, z_negative.T,
+                    levels=levels, cmap=cmap)
 
     pyplot.tight_layout()
     pyplot.savefig(save_path + 'calibration_data.png', dpi=300,
@@ -1351,6 +1369,7 @@ def _diagnostic_self_calibration_plot(
 
     cmap = 'terrain'
     limits = ((0, 2), (-2, 2.5))
+    levels = 80
     mask_negative_vr = (radial_velocity < 0)
     mask_positive_vr = ~mask_negative_vr
 
@@ -1376,7 +1395,7 @@ def _diagnostic_self_calibration_plot(
     cbar.ax.tick_params(size=0, labelleft=False, labelright=False,
                         labeltop=False, labelbottom=False)
 
-    # Compute counts gradient for top two panels
+    # Compute counts histograms for top two panels
     x_mesh_positive, y_mesh_positive, z_positive = \
         _hist2d_mesh(radius[mask_positive_vr],
                      log_velocity_squared[mask_positive_vr],
@@ -1399,7 +1418,7 @@ def _diagnostic_self_calibration_plot(
     pyplot.sca(axes[0])
     pyplot.title(r'$v_r > 0$', fontsize=SIZE_LABELS)
     pyplot.contourf(x_mesh_positive, y_mesh_positive, z_positive.T,
-                    levels=80, cmap=cmap)
+                    levels=levels, cmap=cmap)
     pyplot.plot(x, line_positive_vr, lw=2.0,
                 color="r", label=label_positive_vr)
     pyplot.legend(loc='lower left', fontsize=SIZE_LEGEND)
@@ -1408,7 +1427,7 @@ def _diagnostic_self_calibration_plot(
     pyplot.sca(axes[1])
     pyplot.title(r'$v_r < 0$', fontsize=SIZE_LABELS)
     pyplot.contourf(x_mesh_negative, y_mesh_negative, z_negative.T,
-                    levels=80, cmap=cmap)
+                    levels=levels, cmap=cmap)
     pyplot.plot(x, line_negative_vr, lw=2.0,
                 color="k", label=label_negative_vr)
     pyplot.plot(x_low, curve_low, lw=2.0, color='r', ls='--')
@@ -1438,7 +1457,7 @@ def _diagnostic_self_calibration_plot(
     # Bottom-left
     pyplot.sca(axes[2])
     pyplot.contourf(x_mesh_positive, y_mesh_positive, z_grad_positive.T,
-                    levels=80, cmap=cmap)
+                    levels=levels, cmap=cmap)
     pyplot.plot(radial_bins_positive,
                 gradient_minumum_positive, lw=1.0, color="r")
     pyplot.plot(x, line_positive_vr, lw=2.0, color="r", label='Cut line')
@@ -1446,7 +1465,7 @@ def _diagnostic_self_calibration_plot(
     # Bottom-right
     pyplot.sca(axes[3])
     pyplot.contourf(x_mesh_negative, y_mesh_negative, z_grad_negative.T,
-                    levels=80, cmap=cmap)
+                    levels=levels, cmap=cmap)
     pyplot.plot(radial_bins_negative,
                 gradient_minumum_negative, lw=1.0, color="r")
     pyplot.plot(x, line_negative_vr, lw=2.0, color="k", label='Cut line')
