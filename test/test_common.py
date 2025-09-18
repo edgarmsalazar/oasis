@@ -845,41 +845,33 @@ class TestValidateInputsSeedData:
     def valid_seed_data(self):
         """Fixture providing valid seed data."""
         n_seeds = 10
-        id = numpy.arange(1, n_seeds + 1)
         position = numpy.random.rand(n_seeds, 3) * 100.0
         velocity = numpy.random.randn(n_seeds, 3) * 1000.0
         mass = numpy.random.rand(n_seeds) * 1e15
         radius = (3. * mass / 4. / numpy.pi / 200. / 0.3 / 2.77e11)**(1./3.)
-        return id, position, velocity, mass, radius
+        return position, velocity, mass, radius
     
     @pytest.fixture
     def valid_seed_data_single(self):
         """Fixture providing valid seed data."""
-        id = 1
         position = numpy.empty((1, 3))
         velocity = numpy.empty((1, 3))
         mass = 1e15
         radius = numpy.power(3. * mass / 4. / numpy.pi / 200. / 0.3 / 2.77e11, 1./3.)
-        return id, position, velocity, mass, radius
+        return position, velocity, mass, radius
 
     def test_valid_inputs(self, valid_seed_data, valid_seed_data_single):
         """Test that valid inputs don't raise exceptions."""
         common._validate_inputs_seed_data(valid_seed_data)
         common._validate_inputs_seed_data(valid_seed_data_single)
 
-    def test_ids_not_integer(self, valid_seed_data):
-        """Test that non-integer ids raise TypeError."""
-        id, position, velocity, mass, radius = valid_seed_data
-        id_float = id.astype(float)
-        with pytest.raises(TypeError, match="Seed IDs must be positive integers"):
-            common._validate_inputs_seed_data((id_float, position, velocity, mass, radius))
-    
-    def test_ids_not_positive(self, valid_seed_data):
-        """Test that non-positive ids raise TypeError."""
-        id, position, velocity, mass, radius = valid_seed_data
-        id *= -1
-        with pytest.raises(TypeError, match="Seed IDs must be positive integers"):
-            common._validate_inputs_seed_data((id, position, velocity, mass, radius))
+    def test_wrong_length(self, valid_seed_data, valid_seed_data_single):
+        """Test that the wrong number of elements raises excpetions"""
+        with pytest.raises(ValueError, match='seed_data must be a tuple of 4 elements'):
+            common._validate_inputs_seed_data((*valid_seed_data, valid_seed_data[0]))
+        
+        with pytest.raises(ValueError, match='seed_data must be a tuple of 4 elements'):
+            common._validate_inputs_seed_data((*valid_seed_data_single, valid_seed_data_single[0]))
 
-    # def test_
+
 ###
