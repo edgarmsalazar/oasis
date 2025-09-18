@@ -98,7 +98,6 @@ def _compute_r200m_and_v200m(
     G_GRAVITY : Gravitational constant used in V200 computation
     """
     # Input validation
-    _validate_inputs_coordinate_arrays(radial_distances, 'radial_distances')
     _validate_inputs_positive_number(particle_mass, 'particle_mass')
     _validate_inputs_positive_number(mass_density, 'mass_density')
 
@@ -254,11 +253,11 @@ def _get_candidate_particle_data(
     velocity_components : Decomposes velocities into radial/tangential components
     """
     # Validate inputs
-    _validate_inputs_mini_box_id(mini_box_id)
+    _validate_inputs_boxsize_minisize(boxsize, minisize)
+    _validate_inputs_mini_box_id(mini_box_id, int(numpy.ceil(boxsize/minisize)))
     _validate_inputs_coordinate_arrays(position_seeds, 'seed positions')
     _validate_inputs_coordinate_arrays(velocity_seeds, 'seed velocities')
     _validate_inputs_existing_path(save_path)
-    _validate_inputs_boxsize_minisize(boxsize, minisize)
     _validate_inputs_positive_number(r_max, 'r_max')
     _validate_inputs_positive_number(particle_mass, 'particle_mass')
     _validate_inputs_positive_number(mass_density, 'rhom')
@@ -530,7 +529,8 @@ def _diagnostic_calibration_data_plot(
     mask_negative_vr = (radial_velocity < 0)
     mask_positive_vr = ~mask_negative_vr
 
-    fig, axes = pyplot.subplots(2, 2, figsize=(8, 8))
+    fig, axes = pyplot.subplots(1, 2, figsize=(8, 4.2))
+    fig.suptitle('Calibration data', fontsize=SIZE_LABELS)
     axes = axes.flatten()
 
     for ax in axes:
@@ -553,17 +553,16 @@ def _diagnostic_calibration_data_plot(
     pyplot.hist2d(radius[mask_positive_vr], 
                   log_velocity_squared[mask_positive_vr], 
                   bins=200, cmap=cmap, range=limits)
-    pyplot.legend(fontsize=SIZE_LEGEND)
 
     pyplot.sca(axes[1])
     pyplot.title(r'$v_r < 0$', fontsize=SIZE_LABELS)
     pyplot.hist2d(radius[mask_negative_vr], 
                   log_velocity_squared[mask_negative_vr], 
                   bins=200, cmap=cmap, range=limits)
-    pyplot.legend(fontsize=SIZE_LEGEND)
 
     pyplot.tight_layout()
-    pyplot.savefig(save_path + 'calibration_data.png', dpi=300)
+    pyplot.savefig(save_path + 'calibration_data.png', dpi=300, 
+                   bbox_inches='tight')
 
     return None
 
@@ -580,7 +579,7 @@ def get_calibration_data(
     isolation_factor: float = 0.2,
     isolation_radius_factor: float = 2.0,
     n_threads: int = None,
-    diagnostic: bool = True,
+    diagnostics: bool = True,
 ) -> Tuple[numpy.ndarray]:
     """_summary_
 
@@ -640,7 +639,7 @@ def get_calibration_data(
             hdf.create_dataset('vr', data=radial_velocity)
             hdf.create_dataset('lnv2', data=log_velocity_squared)
 
-    if diagnostic:
+    if diagnostics:
         _diagnostic_calibration_data_plot(
             save_path=save_path,
             radius=radius,
