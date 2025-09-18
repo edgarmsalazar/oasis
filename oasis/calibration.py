@@ -97,6 +97,8 @@ def _compute_r200m_and_v200m(
     G_GRAVITY : Gravitational constant used in V200 computation
     """
     # Input validation
+    if radial_distances.size == 0:
+        raise ValueError(f"radial_distances is empty")
     _validate_inputs_positive_number(particle_mass, 'particle_mass')
     _validate_inputs_positive_number(mass_density, 'mass_density')
 
