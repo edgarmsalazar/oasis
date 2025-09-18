@@ -4,25 +4,33 @@ from multiprocessing import Pool
 
 import h5py as h5
 import numpy as np
-from scipy.optimize import curve_fit, minimize
 from scipy.ndimage import gaussian_filter1d
+from scipy.optimize import curve_fit, minimize
 from tqdm import tqdm
 
-from oasis.common import G_GRAVITY
+from oasis.common import (G_GRAVITY, _validate_inputs_boxsize_minisize,
+                          _validate_inputs_coordinate_arrays,
+                          _validate_inputs_mini_box_id,
+                          _validate_inputs_positive_number)
 from oasis.coordinates import relative_coordinates, velocity_components
 from oasis.minibox import get_mini_box_id, load_particles
 
+__all__ = [
+    'get_calibration_data',
+    'self_calibration',
+    'calibrate',
+]
 
 def _get_candidate_particle_data(
     mini_box_id: int,
-    pos_seed: list[np.ndarray],
-    vel_seed: list[np.ndarray],
+    position_seeds: np.ndarray,
+    velocity_seeds: np.ndarray,
     r_max: float,
     boxsize: float,
     minisize: float,
     save_path: str,
     part_mass: float,
-    rhom: float,
+    mass_density: float,
 ) -> np.ndarray:
     """Extracts all requested seeds from a single minibox.
 
@@ -30,9 +38,9 @@ def _get_candidate_particle_data(
     ----------
     mini_box_id : int
         Mini-box ID
-    pos_seed : list[np.ndarray]
+    position_seeds : np.ndarray
         Seed positions
-    vel_seed : list[np.ndarray]
+    velocity_seeds : np.ndarray
         Seed velocities
     r_max : float
         Maximum distance to consider
@@ -53,19 +61,29 @@ def _get_candidate_particle_data(
         Particle's radial distance, radial velocity and log of the square of the
         velocity in units of R200m and M200m.
     """
+    # Validate inputs
+    _validate_inputs_mini_box_id(mini_box_id)
+    _validate_inputs_coordinate_arrays(position_seeds, 'seed positions')
+    _validate_inputs_coordinate_arrays(velocity_seeds, 'seed velocities')
+    _validate_inputs_boxsize_minisize(boxsize, minisize)
+    _validate_inputs_positive_number(r_max, 'r_max')
+    _validate_inputs_positive_number(part_mass, 'part_mass')
+    _validate_inputs_positive_number(mass_density, 'rhom')
+
     # Load particles in minibox.
-    pos, vel, *_ = load_particles(mini_box_id, boxsize, minisize, save_path)
+    position_particles, velocity_particles, *_ = \
+        load_particles(mini_box_id, boxsize, minisize, save_path)
 
     # Iterate over seeds in current mini box.
-    r, vr, lnv2 = ([] for _ in range(3))
-    for i in range(len(pos_seed)):
+    radius, radial_velocity, log_velocity_sq = ([] for _ in range(3))
+    for i in range(len(position_seeds)):
         # Compute the relative positions of all particles in the box
-        rel_pos = relative_coordinates(pos, pos_seed[i], boxsize)
+        rel_pos = relative_coordinates(position_particles, position_seeds[i], boxsize)
         # Only work with those close to the seed
         mask_close = np.prod(np.abs(rel_pos) <= r_max, axis=1, dtype=bool)
 
         rel_pos = rel_pos[mask_close]
-        rel_vel = vel[mask_close] - vel_seed[i]
+        rel_vel = velocity_particles[mask_close] - velocity_seeds[i]
         
         # Compute radial distance, radial and tangential velocities
         rps = np.sqrt(np.sum(np.square(rel_pos), axis=1))
@@ -76,7 +94,7 @@ def _get_candidate_particle_data(
         mass_prof = part_mass * np.arange(1, len(rps_prof)+1)
         # Find \rho(r) = 200*\rhom
         rho200_loc = np.argmax(mass_prof / (4 / 3 * np.pi * rps_prof ** 3) \
-                               <= 200 * rhom)
+                               <= 200 * mass_density)
         r200m = rps_prof[rho200_loc]
         m200m = mass_prof[rho200_loc]
 
@@ -84,16 +102,17 @@ def _get_candidate_particle_data(
         v200sq = G_GRAVITY * m200m / r200m
         
         # Append rescaled quantities to containers
-        r.append(rps/r200m)
-        vr.append(vrp/np.sqrt(v200sq))
-        lnv2.append(np.log(v2p/v200sq))
+        radius.append(rps/r200m)
+        radial_velocity.append(vrp/np.sqrt(v200sq))
+        log_velocity_sq.append(np.log(v2p/v200sq))
     
     # Concatenate into a single array
-    r = np.concatenate(r)
-    vr = np.concatenate(vr)
-    lnv2 = np.concatenate(lnv2)
+    radius = np.concatenate(radius)
+    radial_velocity = np.concatenate(radial_velocity)
+    log_velocity_sq = np.concatenate(log_velocity_sq)
 
-    return np.vstack([r, vr, lnv2])
+    return np.vstack([radius, radial_velocity, log_velocity_sq])
+
 
 def _select_candidate_seeds(
     n_seeds: int,
@@ -158,7 +177,7 @@ def _select_candidate_seeds(
     # execution time and scales with the number of candidate seeds requested.
     seed_i = []
     i = 0
-    print('Looking for candidate seeds...')
+    # print('Looking for candidate seeds...')
     while len(seed_i) < n_seeds:
         # Exit the loop if there are no more seeds in the list.
         if i >= len(hid)-1: 
@@ -170,7 +189,7 @@ def _select_candidate_seeds(
         if np.all(m200b[mask_close & mask_self] < (0.2 * m200b[i])):
             seed_i.append(i)
         i += 1
-    print(f'Found candidate seeds.')
+    # print(f'Found candidate seeds.')
 
     hid = hid[seed_i]
     pos_seed = pos_seed[seed_i]
@@ -289,6 +308,7 @@ def get_calibration_data(
             hdf.create_dataset('lnv2', data=out[:, 2])
 
         return out[:, 0], out[:, 1], out[:, 2]
+
 
 
 def cost_percentile(b: float, *data) -> float:
