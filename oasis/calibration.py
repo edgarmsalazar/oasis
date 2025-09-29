@@ -1214,8 +1214,8 @@ def _gradient_minima(
     r_min: float,
     r_max: float,
     save_path: str,
-    n_bins: int = 100,
-    sigma_smooth: float = 2.0,
+    n_bins: int = 200,
+    sigma_smooth: float = 1.5,
     diagnostics: bool = True,
     diagnostics_title: str = None,
 ) -> Tuple[numpy.ndarray]:
@@ -1256,12 +1256,12 @@ def _gradient_minima(
             (radius < radius_edges[i + 1])
 
         # Compute histogram of lnv2 values within the r bin and the vr mask
-        counts, lnv2_edges = numpy.histogram(
+        counts, log_velocity_squared_edges = numpy.histogram(
             log_velocity_squared[radius_mask], bins=n_bins)
 
         # Compute the gradient of the histogram
         counts_gradient = numpy.gradient(
-            counts, numpy.mean(numpy.diff(lnv2_edges)))
+            counts, numpy.mean(numpy.diff(log_velocity_squared_edges)))
         counts_gradient /= numpy.max(numpy.abs(counts_gradient))
 
         # Smooth the gradient
@@ -1269,9 +1269,15 @@ def _gradient_minima(
             counts_gradient, sigma_smooth)
 
         # Find the lnv2 value corresponding to the minimum of the smoothed gradient
-        log_velocity_squared_bins = 0.5 * (lnv2_edges[:-1] + lnv2_edges[1:])
-        counts_gradient_minima[i] = log_velocity_squared_bins[numpy.argmin(
-            counts_gradient_smooth)]
+        log_velocity_squared_bins = 0.5 * (log_velocity_squared_edges[:-1] +
+                                           log_velocity_squared_edges[1:])
+        # counts_gradient_minima[i] = log_velocity_squared_bins[numpy.argmin(
+        #     counts_gradient_smooth)]
+
+        mask_log_velocity_squared = (1.0 < log_velocity_squared_bins) & \
+            (log_velocity_squared_bins < 2.0)
+        counts_gradient_minima[i] = log_velocity_squared_bins[mask_log_velocity_squared][numpy.argmin(
+            counts_gradient[mask_log_velocity_squared])]
 
         # Store diagnostics
         log_velocity_squared_bins_out[i, :] = log_velocity_squared_bins
@@ -1545,6 +1551,7 @@ def self_calibration(
         isolation_radius_factor=isolation_radius_factor,
         diagnostics=diagnostics,
     )
+    print(radius.shape)
 
     mask_negative_vr = (radial_velocity < 0)
     mask_positive_vr = ~mask_negative_vr
@@ -1553,7 +1560,7 @@ def self_calibration(
     def line_model(x, slope, abscissa): return slope * \
         (x - radius_pivot) + abscissa
 
-    n_bins = 200
+    # n_bins = 200
     # For vr > 0 ===============================================================
     radial_bins_positive, gradient_minumum_positive = _gradient_minima(
         radius=radius[mask_positive_vr],
@@ -1562,7 +1569,7 @@ def self_calibration(
         r_min=gradient_radial_lims[0],
         r_max=gradient_radial_lims[1],
         save_path=save_path,
-        n_bins=n_bins,
+        # n_bins=n_bins,
         diagnostics=diagnostics,
         diagnostics_title=r'Positive $v_r$ slope calibration',
     )
@@ -1592,7 +1599,7 @@ def self_calibration(
         r_min=gradient_radial_lims[0],
         r_max=gradient_radial_lims[1],
         save_path=save_path,
-        n_bins=n_bins,
+        # n_bins=n_bins,
         diagnostics=diagnostics,
         diagnostics_title=r'Negative $v_r$ slope calibration',
     )
