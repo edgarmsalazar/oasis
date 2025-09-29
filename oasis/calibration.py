@@ -6,7 +6,7 @@ import h5py
 import numpy
 from matplotlib import pyplot
 from matplotlib.colorbar import ColorbarBase
-from scipy.ndimage import gaussian_filter1d
+from scipy.ndimage import gaussian_filter
 from scipy.optimize import curve_fit, minimize
 from tqdm import tqdm
 
@@ -1265,7 +1265,7 @@ def _gradient_minima(
         counts_gradient /= numpy.max(numpy.abs(counts_gradient))
 
         # Smooth the gradient
-        counts_gradient_smooth = gaussian_filter1d(
+        counts_gradient_smooth = gaussian_filter(
             counts_gradient, sigma_smooth)
 
         # Find the lnv2 value corresponding to the minimum of the smoothed gradient
@@ -1335,7 +1335,7 @@ def _hist2d_mesh(
 
 
 def _smooth_2d_hist(arr: numpy.ndarray, sigma: float = 2.0) -> numpy.ndarray:
-    arr_smooth = gaussian_filter1d(arr, sigma=sigma)
+    arr_smooth = gaussian_filter(arr, sigma=sigma)
     return arr_smooth
 
 
