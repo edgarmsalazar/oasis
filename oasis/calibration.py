@@ -1279,7 +1279,7 @@ def _gradient_minima(
         # counts_gradient_minima[i] = log_velocity_squared_bins[numpy.argmin(
         #     counts_gradient_smooth)]
 
-        mask_log_velocity_squared = (1.0 < log_velocity_squared_bins) & \
+        mask_log_velocity_squared = (0. < log_velocity_squared_bins) & \
             (log_velocity_squared_bins < 2.0)
         counts_gradient_minima[i] = log_velocity_squared_bins[mask_log_velocity_squared][numpy.argmin(
             counts_gradient[mask_log_velocity_squared])]
