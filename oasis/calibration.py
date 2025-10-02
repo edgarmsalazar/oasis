@@ -79,8 +79,8 @@ def _compute_r200m_and_v200m(
     Notes
     -----
     - The algorithm sorts particles by radius and computes cumulative mass profile
-    - Density is computed as ρ(r) = M(<r) / (4π/3 x r³)  
-    - R200m corresponds to the largest radius where ρ(r) ≥ 200xρ_m
+    - Density is computed as rho(r) = M(<r) / (4π/3 x r³)  
+    - R200m corresponds to the largest radius where rho(r) ≥ 200xrho_m
     - If no radius satisfies the criterion, uses the outermost particle
     - V200² = GM200m/R200m where G is the gravitational constant
 
@@ -228,7 +228,7 @@ def _get_candidate_particle_data(
     Notes
     -----
     - Uses periodic boundary conditions when computing relative coordinates
-    - R200m is defined as the radius where mean enclosed density equals 200xρ_m
+    - R200m is defined as the radius where mean enclosed density equals 200xrho_m
     - V200 = √(GM200m/R200m) where M200m is the mass within R200m
     - Seeds with insufficient particles or invalid virial properties are skipped
     - Memory usage scales with the number of particles within r_max of all seeds

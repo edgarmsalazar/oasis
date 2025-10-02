@@ -129,7 +129,7 @@ def get_adjacent_mini_box_ids(
     """
     Returns all mini-box IDs adjacent to a specified mini-box, including itself.
 
-    This function finds all 27 mini-boxes in the 3×3×3 neighborhood surrounding
+    This function finds all 27 mini-boxes in the 3x3x3 neighborhood surrounding
     the given mini-box ID in a 3D grid. The neighborhood includes the center box
     itself and all 26 surrounding boxes. Periodic boundary conditions are applied,
     so boxes at the grid edges wrap around to the opposite side.
@@ -164,7 +164,7 @@ def get_adjacent_mini_box_ids(
     -----
     - Uses periodic boundary conditions: mini-boxes at grid boundaries are
       considered adjacent to mini-boxes on the opposite boundary.
-    - The 3D grid uses the mapping: ID = k + j×nx + i×nx², where (i,j,k) are
+    - The 3D grid uses the mapping: ID = k + jxnx + ixnx², where (i,j,k) are
       grid coordinates and nx is the number of cells per side.
     - For a grid with n cells per side, total mini-boxes = n³.
     - The function always returns exactly 27 IDs regardless of grid size.
@@ -172,12 +172,12 @@ def get_adjacent_mini_box_ids(
     Examples
     --------
     >>> import numpy as np
-    >>> # 2×2×2 grid (8 total mini-boxes)
+    >>> # 2x2x2 grid (8 total mini-boxes)
     >>> get_adjacent_mini_box_ids(0, boxsize=2.0, minisize=1.0)
     array([0, 1, 2, 3, 4, 5, 6, 7, ...], dtype=int32)  # All boxes due to wrapping
 
     >>> # Larger grid - interior box
-    >>> ids = get_adjacent_mini_box_ids(111, boxsize=10.0, minisize=1.0)  # 10×10×10 grid
+    >>> ids = get_adjacent_mini_box_ids(111, boxsize=10.0, minisize=1.0)  # 10x10x10 grid
     >>> len(ids)
     27
     >>> ids[0]  # First element is always the input ID
@@ -219,7 +219,7 @@ def get_adjacent_mini_box_ids(
     adjacent_ids[0] = mini_box_id
     idx = 1
 
-    # Generate 3×3×3 neighborhood with periodic boundary conditions
+    # Generate 3x3x3 neighborhood with periodic boundary conditions
     for di in [-1, 0, 1]:
         for dj in [-1, 0, 1]:
             for dk in [-1, 0, 1]:
