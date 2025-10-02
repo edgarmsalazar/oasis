@@ -1276,13 +1276,15 @@ def _gradient_minima(
         # Find the lnv2 value corresponding to the minimum of the smoothed gradient
         log_velocity_squared_bins = 0.5 * (log_velocity_squared_edges[:-1] +
                                            log_velocity_squared_edges[1:])
-        # counts_gradient_minima[i] = log_velocity_squared_bins[numpy.argmin(
-        #     counts_gradient_smooth)]
-
-        mask_log_velocity_squared = (0. < log_velocity_squared_bins) & \
-            (log_velocity_squared_bins < 2.0)
+        
+        # This is should be the choice but it is not giving the same approximate 
+        # result as before.
+        mask_log_velocity_squared = (0. < log_velocity_squared_bins)
         counts_gradient_minima[i] = log_velocity_squared_bins[mask_log_velocity_squared][numpy.argmin(
-            counts_gradient[mask_log_velocity_squared])]
+            counts_gradient_smooth[mask_log_velocity_squared])]
+
+        # counts_gradient_minima[i] = log_velocity_squared_bins[mask_log_velocity_squared][numpy.argmin(
+        #     counts_gradient[mask_log_velocity_squared])]
 
         # Store diagnostics
         log_velocity_squared_bins_out[i, :] = log_velocity_squared_bins
