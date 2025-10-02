@@ -1122,7 +1122,7 @@ def _cost_percentile(b: float, *data) -> float:
     return cost
 
 
-def _cost_perpendicular_distance(b: float, *data) -> float:
+def _cost_perpendicular_distance_abscissa(b: float, *data) -> float:
     """Cost function for abscissa b parameter. The optimal value of b is such
     that the perpendicular distance of all points to the line is maximal
     Parameters
@@ -1139,6 +1139,37 @@ def _cost_perpendicular_distance(b: float, *data) -> float:
     float
     """
     radius, log_velocity_squared, slope, width, radius_pivot = data
+    line = slope * (radius - radius_pivot) + b
+
+    # Perpendicular distance to the line
+    distance = numpy.abs(log_velocity_squared - line) / \
+        numpy.sqrt(1 + slope**2)
+
+    # Select only elements within the width of the band
+    distance_within_band = distance[(distance < width)]
+
+    # Cost to maximize (thus negative)
+    cost = -numpy.log(numpy.mean(distance_within_band ** 2))
+    return cost
+    
+
+def _cost_perpendicular_distance_slope(slope: float, *data) -> float:
+    """Cost function for slope m parameter. The optimal value of m is such
+    that the perpendicular distance of all points to the line is maximal
+    Parameters
+    ----------
+    m : float
+        Fit parameter
+    *data: tuple
+        A tuple with `[r, lnv2, abscissa, width]`, where `abscissa` is the value
+        at the pivot of the line and is fixed, and `width` is the width of a 
+        band around the line within which the distance is computed
+
+    Returns
+    -------
+    float
+    """
+    radius, log_velocity_squared, b, width, radius_pivot = data
     line = slope * (radius - radius_pivot) + b
 
     # Perpendicular distance to the line
@@ -1563,13 +1594,17 @@ def self_calibration(
 
     mask_negative_vr = (radial_velocity < 0)
     mask_positive_vr = ~mask_negative_vr
-    mask_low_radius = radius <= 2.0
+    mask_radius = radius <= 2.0
+    mask_low_radius = radius <= 1.0
     radius_pivot = 0.5
     def line_model(x, slope, abscissa): return slope * \
         (x - radius_pivot) + abscissa
 
-    # n_bins = 200
-    # For vr > 0 ===============================================================
+    # ==========================================================================
+    # 
+    #                           Positive radial velocity
+    # 
+    # ==========================================================================
     radial_bins_positive, gradient_minumum_positive = _gradient_minima(
         radius=radius[mask_positive_vr],
         log_velocity_squared=log_velocity_squared[mask_positive_vr],
@@ -1577,7 +1612,6 @@ def self_calibration(
         r_min=gradient_radial_lims[0],
         r_max=gradient_radial_lims[1],
         save_path=save_path,
-        # n_bins=n_bins,
         diagnostics=diagnostics,
         diagnostics_title=r'Positive $v_r$ slope calibration',
     )
@@ -1592,14 +1626,18 @@ def self_calibration(
         fun=_cost_percentile,
         x0=1.1 * abscissa_p,
         bounds=((abscissa_p, 5.0),),
-        args=(radius[mask_positive_vr & mask_low_radius],
-              log_velocity_squared[mask_positive_vr & mask_low_radius],
+        args=(radius[mask_positive_vr & mask_radius],
+              log_velocity_squared[mask_positive_vr & mask_radius],
               slope_positive_vr, percent, radius_pivot),
         method='Nelder-Mead',
     )
     abscissa_positive_vr = result.x[0]
 
-    # For vr < 0 ===============================================================
+    # ==========================================================================
+    # 
+    #                           Negative radial velocity
+    # 
+    # ==========================================================================
     radial_bins_negative, gradient_minumum_negative = _gradient_minima(
         radius=radius[mask_negative_vr],
         log_velocity_squared=log_velocity_squared[mask_negative_vr],
@@ -1607,33 +1645,52 @@ def self_calibration(
         r_min=gradient_radial_lims[0],
         r_max=gradient_radial_lims[1],
         save_path=save_path,
-        # n_bins=n_bins,
         diagnostics=diagnostics,
         diagnostics_title=r'Negative $v_r$ slope calibration',
     )
     # Find slope by fitting to the minima.
-    (slope_negative_vr, abscissa_n), _ = curve_fit(line_model, radial_bins_negative,
+    (slope_n, abscissa_n), _ = curve_fit(line_model, radial_bins_negative,
                                                    gradient_minumum_negative,
                                                    p0=[-1, 2], bounds=((-5, 0), (0, 3)))
+    
+    # The user input width is scaled with redshift such that it is double at 
+    # z = 3. This was needed due to the numerical noise in the cost function 
+    # when using small band widths. Has not been tested beyond this redshift.
+    width *= (1. + redshift/3.)
 
     # Find intercept by finding the value that maximizes the perpendicular
     # distance to the line at fixed slope of all points within a perpendicular
     # 'width' distance from the line (ignoring all others).
     result = minimize(
-        fun=_cost_perpendicular_distance,
+        fun=_cost_perpendicular_distance_abscissa,
         x0=0.5 * abscissa_n,
         bounds=((0., abscissa_n),),
-        args=(radius[mask_negative_vr], log_velocity_squared[mask_negative_vr],
-              slope_negative_vr, width, radius_pivot),
+        args=(radius[mask_negative_vr & mask_low_radius], 
+              log_velocity_squared[mask_negative_vr & mask_low_radius],
+              slope_n, width, radius_pivot),
         method='Nelder-Mead',
     )
     abscissa_negative_vr = result.x[0]
 
+    # Refine the slope by fitting with fixed abscissa.
+    result = minimize(
+        fun=_cost_perpendicular_distance_slope,
+        x0=slope_n,
+        bounds=((1.5*slope_n, 0.5*slope_n),),
+        args=(radius[mask_negative_vr & mask_low_radius], 
+              log_velocity_squared[mask_negative_vr & mask_low_radius],
+              abscissa_negative_vr, width, radius_pivot),
+        method='Nelder-Mead',
+    )
+    slope_negative_vr = result.x[0]
+
+    # Compute low radius correction parameters
     b_neg = abscissa_negative_vr - slope_negative_vr * radius_pivot
     gamma = 2.
     alpha = (gamma - b_neg) / radius_pivot**2
     beta = slope_negative_vr - 2 * alpha * radius_pivot
 
+    # Save to file
     with h5py.File(save_path + 'calibration_pars.hdf5', 'w') as hdf:
         hdf.create_dataset(
             'pos', data=[slope_positive_vr, abscissa_positive_vr])
