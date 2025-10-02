@@ -202,9 +202,9 @@ class TestValidateInputsPositiveNumber:
     def test_valid_inputs(self):
         """Test that valid inputs don't raise exceptions."""
         # Should not raise any exceptions
-        common._validate_inputs_positive_number(1.0, "test_param")
-        common._validate_inputs_positive_number(100, "test_param")
-        common._validate_inputs_positive_number(
+        common._validate_inputs_positive_number_non_zero(1.0, "test_param")
+        common._validate_inputs_positive_number_non_zero(100, "test_param")
+        common._validate_inputs_positive_number_non_zero(
             0.0001, "test_param")  # Small positive
 
     @pytest.mark.parametrize(
@@ -220,35 +220,35 @@ class TestValidateInputsPositiveNumber:
     def test_type_errors(self, value, expected_error):
         """Test that invalid types raise TypeError."""
         with pytest.raises(expected_error, match="test_param must be numeric"):
-            common._validate_inputs_positive_number(value, "test_param")
+            common._validate_inputs_positive_number_non_zero(value, "test_param")
 
     @pytest.mark.parametrize(
         "value, expected_error, error_message",
         [
             # Negative values
-            (-1.0, ValueError, "test_param must be positive"),
-            (-100, ValueError, "test_param must be positive"),
-            (-0.0001, ValueError, "test_param must be positive"),
+            (-1.0, ValueError, "test_param must be zero or positive"),
+            (-100, ValueError, "test_param must be zero or positive"),
+            (-0.0001, ValueError, "test_param must be zero or positive"),
             # Zero value
-            (0, ValueError, "test_param must be positive"),
-            (0.0, ValueError, "test_param must be positive"),
+            (0, ValueError, "test_param must be non-zero"),
+            (0.0, ValueError, "test_param must be non-zero"),
         ],
     )
     def test_value_errors(self, value, expected_error, error_message):
         """Test that invalid values raise ValueError with correct messages."""
         with pytest.raises(expected_error, match=error_message):
-            common._validate_inputs_positive_number(value, "test_param")
+            common._validate_inputs_positive_number_non_zero(value, "test_param")
 
     def test_edge_cases(self):
         """Test edge cases with very small or very large numbers."""
         # Very small positive number
-        common._validate_inputs_positive_number(1e-10, "test_param")
+        common._validate_inputs_positive_number_non_zero(1e-10, "test_param")
 
         # Very large number
-        common._validate_inputs_positive_number(1e10, "test_param")
+        common._validate_inputs_positive_number_non_zero(1e10, "test_param")
 
         # Float precision edge case
-        common._validate_inputs_positive_number(1.0000001, "test_param")
+        common._validate_inputs_positive_number_non_zero(1.0000001, "test_param")
 
 
 class TestValidateInputsCoordinateArrays:

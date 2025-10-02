@@ -243,8 +243,15 @@ def _validate_inputs_positive_number(value, name):
     """Validate that a value is a positive number."""
     if not isinstance(value, (int, float, numpy.number)):
         raise TypeError(f"{name} must be numeric")
-    if value <= 0:
-        raise ValueError(f"{name} must be positive")
+    if value < 0:
+        raise ValueError(f"{name} must be zero or positive")
+
+
+def _validate_inputs_positive_number_non_zero(value, name):
+    """Validate that a value is a positive number."""
+    _validate_inputs_positive_number(value, name)
+    if value == 0:
+        raise ValueError(f"{name} must be non-zero")
 
 
 def _validate_inputs_coordinate_arrays(arr, name):
@@ -276,8 +283,8 @@ def _validate_inputs_existing_path(path):
 def _validate_inputs_boxsize_minisize(boxsize, minisize):
     """Validate boxsize and minize and raise appropriate errors."""
     # Validate both are positive numbers
-    _validate_inputs_positive_number(boxsize, "boxsize")
-    _validate_inputs_positive_number(minisize, "minisize")
+    _validate_inputs_positive_number_non_zero(boxsize, "boxsize")
+    _validate_inputs_positive_number_non_zero(minisize, "minisize")
 
     # Check that minisize is not larger than boxsize
     if minisize > boxsize:
@@ -286,14 +293,13 @@ def _validate_inputs_boxsize_minisize(boxsize, minisize):
 
 def _validate_inputs_mini_box_id(mini_box_id, cells_per_side):
     """Validate mini-box ID and raise appropriate errors."""
-    # Check mini_box_id is a positive number
 
     # Check mini_box_id is an integer
     if not isinstance(mini_box_id, (int, numpy.integer)):
         raise TypeError("mini_box_id must be an integer")
 
-    if mini_box_id < 0:
-        raise ValueError("mini_box_id must be zero or positive")
+    # Check mini_box_id is a positive number
+    _validate_inputs_positive_number(mini_box_id, 'mini_box_id')
 
     # Check cells_per_side is a positive integer
     if not isinstance(cells_per_side, (int, numpy.integer)):
@@ -367,7 +373,7 @@ def _validate_inputs_load(
     _validate_inputs_existing_path(load_path)
 
     # Validate padding
-    _validate_inputs_positive_number(padding, "padding")
+    _validate_inputs_positive_number_non_zero(padding, "padding")
 
 
 def _validate_inputs_seed_data(seed_data):

@@ -1,7 +1,7 @@
 import numpy
 
 from oasis.common import (_validate_inputs_coordinate_arrays,
-                          _validate_inputs_positive_number)
+                          _validate_inputs_positive_number_non_zero)
 
 
 def relative_coordinates(
@@ -90,7 +90,7 @@ def relative_coordinates(
         positions = positions.reshape(1, 3)
 
     # Box size validation
-    _validate_inputs_positive_number(box_size, "box_size")
+    _validate_inputs_positive_number_non_zero(box_size, "box_size")
 
     # Compute displacement vectors
     displacement = positions - reference

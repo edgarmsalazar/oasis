@@ -14,7 +14,7 @@ from oasis.common import (G_GRAVITY, _validate_inputs_boxsize_minisize,
                           _validate_inputs_coordinate_arrays,
                           _validate_inputs_existing_path,
                           _validate_inputs_mini_box_id,
-                          _validate_inputs_positive_number,
+                          _validate_inputs_positive_number_non_zero,
                           _validate_inputs_seed_data)
 from oasis.coordinates import relative_coordinates, velocity_components
 from oasis.minibox import get_mini_box_id, load_particles
@@ -79,8 +79,8 @@ def _compute_r200m_and_v200m(
     Notes
     -----
     - The algorithm sorts particles by radius and computes cumulative mass profile
-    - Density is computed as ρ(r) = M(<r) / (4π/3 × r³)  
-    - R200m corresponds to the largest radius where ρ(r) ≥ 200×ρ_m
+    - Density is computed as ρ(r) = M(<r) / (4π/3 x r³)  
+    - R200m corresponds to the largest radius where ρ(r) ≥ 200xρ_m
     - If no radius satisfies the criterion, uses the outermost particle
     - V200² = GM200m/R200m where G is the gravitational constant
 
@@ -103,8 +103,8 @@ def _compute_r200m_and_v200m(
     # Input validation
     if radial_distances.size == 0:
         raise ValueError(f"radial_distances is empty")
-    _validate_inputs_positive_number(particle_mass, 'particle_mass')
-    _validate_inputs_positive_number(mass_density, 'mass_density')
+    _validate_inputs_positive_number_non_zero(particle_mass, 'particle_mass')
+    _validate_inputs_positive_number_non_zero(mass_density, 'mass_density')
 
     # Sort distances for cumulative mass profile
     sorted_distances = numpy.sort(radial_distances)
@@ -228,7 +228,7 @@ def _get_candidate_particle_data(
     Notes
     -----
     - Uses periodic boundary conditions when computing relative coordinates
-    - R200m is defined as the radius where mean enclosed density equals 200×ρ_m
+    - R200m is defined as the radius where mean enclosed density equals 200xρ_m
     - V200 = √(GM200m/R200m) where M200m is the mass within R200m
     - Seeds with insufficient particles or invalid virial properties are skipped
     - Memory usage scales with the number of particles within r_max of all seeds
@@ -264,9 +264,9 @@ def _get_candidate_particle_data(
     _validate_inputs_coordinate_arrays(position_seeds, 'seed positions')
     _validate_inputs_coordinate_arrays(velocity_seeds, 'seed velocities')
     _validate_inputs_existing_path(save_path)
-    _validate_inputs_positive_number(r_max, 'r_max')
-    _validate_inputs_positive_number(particle_mass, 'particle_mass')
-    _validate_inputs_positive_number(mass_density, 'rhom')
+    _validate_inputs_positive_number_non_zero(r_max, 'r_max')
+    _validate_inputs_positive_number_non_zero(particle_mass, 'particle_mass')
+    _validate_inputs_positive_number_non_zero(mass_density, 'rhom')
 
     # Load particles in minibox.
     position_particles, velocity_particles, _ = \
@@ -330,8 +330,8 @@ def _find_isolated_seeds(
     have masses below a threshold fraction of the candidate seed's mass.
 
     The isolation criterion requires that all neighbors within an isolation
-    radius (isolation_radius_factor × R200) must have masses less than
-    isolation_factor × M200 of the candidate seed.
+    radius (isolation_radius_factor x R200) must have masses less than
+    isolation_factor x M200 of the candidate seed.
 
     Parameters
     ----------
@@ -354,11 +354,11 @@ def _find_isolated_seeds(
         Used for periodic boundary condition calculations.
     isolation_factor : float, optional
         Maximum allowed mass ratio for neighbors. Neighbors must have
-        mass < isolation_factor × seed_mass to satisfy isolation criterion.
+        mass < isolation_factor x seed_mass to satisfy isolation criterion.
         Default is 0.2 (20%).
     isolation_radius_factor : float, optional
         Factor multiplying R200 to define isolation radius. Neighbors within
-        isolation_radius_factor × R200 are checked. Default is 2.0.
+        isolation_radius_factor x R200 are checked. Default is 2.0.
 
     Returns
     -------
@@ -416,10 +416,10 @@ def _find_isolated_seeds(
     """
     # Input validation
     _validate_inputs_coordinate_arrays(position, 'position')
-    _validate_inputs_positive_number(max_seeds, 'max_seeds')
-    _validate_inputs_positive_number(boxsize, 'boxsize')
-    _validate_inputs_positive_number(isolation_factor, 'isolation_factor')
-    _validate_inputs_positive_number(
+    _validate_inputs_positive_number_non_zero(max_seeds, 'max_seeds')
+    _validate_inputs_positive_number_non_zero(boxsize, 'boxsize')
+    _validate_inputs_positive_number_non_zero(isolation_factor, 'isolation_factor')
+    _validate_inputs_positive_number_non_zero(
         isolation_radius_factor, 'isolation_radius_factor')
 
     # This should never be needed as all seeds are assumed to have different
@@ -574,8 +574,8 @@ def _select_candidate_seeds(
     This function identifies the most massive isolated seeds from the input
     catalog and processes particles within r_max of each seed to compute
     scaled kinematic quantities. Only seeds that dominate their local environment
-    are considered (isolation criterion: all neighbors within 2×R200 must have
-    mass < 0.2×M200 of the seed).
+    are considered (isolation criterion: all neighbors within 2 x R200 must have
+    mass < 0.2 x M200 of the seed).
 
     The function performs the following workflow:
     1. Sorts seeds by mass in descending order
@@ -614,7 +614,7 @@ def _select_candidate_seeds(
         (typically M_sun/Mpc^3). Must be positive.
     isolation_factor : float, optional
         Maximum allowed mass ratio for isolation criterion. Neighbors must have
-        mass < isolation_factor × seed_mass. Default is 0.2 (20%).
+        mass < isolation_factor x seed_mass. Default is 0.2 (20%).
     isolation_radius_factor : float, optional
         Factor multiplying R200 to define isolation radius for neighbor search.
         Default is 2.0.
@@ -685,15 +685,15 @@ def _select_candidate_seeds(
     _get_candidate_particle_data : Processes particles around seeds in one minibox
     """
     # Validate inputs
-    _validate_inputs_positive_number(n_seeds, 'n_seeds')
+    _validate_inputs_positive_number_non_zero(n_seeds, 'n_seeds')
     _validate_inputs_seed_data(seed_data)
-    _validate_inputs_positive_number(r_max, 'r_max')
+    _validate_inputs_positive_number_non_zero(r_max, 'r_max')
     _validate_inputs_existing_path(save_path)
     _validate_inputs_boxsize_minisize(boxsize, minisize)
-    _validate_inputs_positive_number(particle_mass, 'particle_mass')
-    _validate_inputs_positive_number(mass_density, 'mass_density')
+    _validate_inputs_positive_number_non_zero(particle_mass, 'particle_mass')
+    _validate_inputs_positive_number_non_zero(mass_density, 'mass_density')
     if n_threads is not None:
-        _validate_inputs_positive_number(n_threads, 'n_threads')
+        _validate_inputs_positive_number_non_zero(n_threads, 'n_threads')
 
     # Unpack seed data
     position, velocity, mass, radius = seed_data
@@ -807,7 +807,7 @@ def _diagnostic_calibration_data_plot(
     Notes
     -----
     - Creates two side-by-side 2D histograms for vr > 0 and vr < 0
-    - Uses 200×200 bins for high-resolution visualization
+    - Uses 200x200 bins for high-resolution visualization
     - Plot ranges are fixed: r/R200m ∈ [0,2], ln(v²/V200²) ∈ [-2,2.5]
     - Uses 'terrain' colormap for particle density visualization
     - Includes LaTeX formatting for axis labels and titles
@@ -941,7 +941,7 @@ def get_calibration_data(
         - radius: shape (n_total_seeds,) - seed virial radii R200 in simulation units
     r_max : float
         Maximum distance from seed centers to consider particles, in 
-        simulation units. Must be positive, typically 2-5 × R200.
+        simulation units. Must be positive, typically 2-5 x R200.
     boxsize : float
         Size of the cubic simulation box in simulation units. Must be positive.
     minisize : float
@@ -956,9 +956,11 @@ def get_calibration_data(
     mass_density : float
         Mean matter density of the universe in simulation units 
         (typically M_sun/Mpc^3). Must be positive.
+    redshift : float
+        Cosmological redshift of the universe in simulation.
     isolation_factor : float, optional
         Maximum allowed mass ratio for isolation criterion. Neighbors must have
-        mass < isolation_factor × seed_mass. Default is 0.2 (20%).
+        mass < isolation_factor x seed_mass. Default is 0.2 (20%).
     isolation_radius_factor : float, optional
         Factor multiplying R200 to define isolation radius for neighbor search.
         Default is 2.0.
@@ -1022,6 +1024,7 @@ def get_calibration_data(
     ...     save_path="/data/calibration/",
     ...     particle_mass=1e10,
     ...     mass_density=2.78e11,
+    ...     redshift=0,
     ...     n_threads=16,
     ...     diagnostics=True
     ... )
@@ -1038,6 +1041,7 @@ def get_calibration_data(
     ...     save_path="/data/calibration/",  # Must contain calibration_data.hdf5
     ...     particle_mass=1e10,
     ...     mass_density=2.78e11,
+    ...     redshift=0,
     ...     diagnostics=False  # Skip plot generation
     ... )
 
@@ -1048,6 +1052,8 @@ def get_calibration_data(
     h5py.File : HDF5 file interface for data persistence
     """
     file_name = save_path + 'calibration_data.hdf5'
+    _validate_inputs_positive_number_non_zero(redshift, 'redshift')
+
     try:
         with h5py.File(file_name, 'r') as hdf:
             radius = hdf['r'][()]
