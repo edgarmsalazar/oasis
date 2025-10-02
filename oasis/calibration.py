@@ -14,6 +14,7 @@ from oasis.common import (G_GRAVITY, _validate_inputs_boxsize_minisize,
                           _validate_inputs_coordinate_arrays,
                           _validate_inputs_existing_path,
                           _validate_inputs_mini_box_id,
+                          _validate_inputs_positive_number,
                           _validate_inputs_positive_number_non_zero,
                           _validate_inputs_seed_data)
 from oasis.coordinates import relative_coordinates, velocity_components
@@ -1098,24 +1099,86 @@ def get_calibration_data(
     return radius, radial_velocity, log_velocity_squared
 
 
-def _cost_percentile(b: float, *data) -> float:
-    """Cost function for abscissa b parameter. The optimal value of b is such
-    that the `target` percentile of particles is below the line.
+def _cost_percentile(abscissa: float, *data) -> float:
+    """Compute cost for fitting line abscissa to achieve target percentile.
+
+    This cost function optimizes the y-intercept (at a pivot radius) of a line
+    with fixed slope such that a specified percentile of data points falls below
+    the line. The cost is minimized when the fraction of points below the line
+    matches the target percentile. 
 
     Parameters
     ----------
-    b : float
-        Fit parameter
+    abscissa : float
+        Y-intercept of the line at the pivot radius (radius_pivot). In the
+        context of velocity analysis, this represents ln(v²/v_200m²) at the
+        pivot radius. Can be positive or negative.
     *data : tuple
-        A tuple with `[r, lnv2, slope, target]`, where `slope` is the slope of 
-        the line and is fixed, and `target` is the desired percentile
+        Variable-length argument tuple containing exactly 5 elements:
+        - radius : numpy.ndarray with shape (n_particles,)
+            Scaled radial distances (r/R200m) for all particles.
+        - log_velocity_squared : numpy.ndarray with shape (n_particles,)
+            Natural log of velocity squared scaled by V200² (ln(v²/v_200m²)).
+        - slope : float
+            Fixed slope of the line in (ln(v²), r/R200m) space. Can be
+            positive, negative, or zero.
+        - target : float
+            Target percentile as a fraction in range [0, 1]. For example,
+            0.9 means 90% of points should be below the line.
+        - radius_pivot : float
+            Pivot radius where the line has value abscissa. Typically chosen 
+            at 0.5 x R200 for numerical stability.
 
     Returns
     -------
-    float
+    cost : float
+        Logarithmic cost function value. Returns ln((target - actual_fraction)²).
+        Minimum occurs when actual fraction equals target. Always finite for
+        target in (0, 1).
+
+    Raises
+    ------
+    ValueError
+        If data tuple doesn't contain exactly 5 elements, or if arrays have
+        incompatible shapes.
+    TypeError
+        If inputs cannot be converted to appropriate numeric types.
+
+    Notes
+    -----
+    - The line equation is: y = slope x (radius - radius_pivot) + abscissa
+    - Cost function uses logarithm to handle small differences robustly
+    - The function is designed for use with scipy.optimize.minimize_scalar
+    - When target = 0.5, finds the median line through the data
+    - Cost is symmetric around the optimal value
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from scipy.optimize import minimize_scalar
+    >>> 
+    >>> # Generate sample data
+    >>> radius = np.random.uniform(0.1, 2.0, 1000)
+    >>> log_v2 = 0.5 * radius + np.random.normal(0, 0.3, 1000)
+    >>> 
+    >>> # Find intercept for 90th percentile line
+    >>> data = (radius, log_v2, 0.5, 0.9, 1.0)
+    >>> result = minimize_scalar(_cost_percentile, args=data, method='brent')
+    >>> optimal_b = result.x
+    >>> print(f"Optimal intercept: {optimal_b:.3f}")
+
+    >>> # Verify that ~90% of points are below the line
+    >>> line = 0.5 * (radius - 1.0) + optimal_b
+    >>> fraction_below = (log_v2 < line).sum() / len(radius)
+    >>> print(f"Actual fraction below: {fraction_below:.2%}")
+
+    See Also
+    --------
+    _cost_perpendicular_distance_abscissa : Alternative cost based on distances
+    scipy.optimize.minimize_scalar : Optimization routine for this cost function
     """
     radius, log_velocity_squared, slope, target, radius_pivot = data
-    line = slope * (radius - radius_pivot) + b
+    line = slope * (radius - radius_pivot) + abscissa
 
     # Total number of elements below the line
     below_line = (log_velocity_squared < line).sum()
@@ -1128,24 +1191,94 @@ def _cost_percentile(b: float, *data) -> float:
     return cost
 
 
-def _cost_perpendicular_distance_abscissa(b: float, *data) -> float:
-    """Cost function for abscissa b parameter. The optimal value of b is such
-    that the perpendicular distance of all points to the line is maximal
+def _cost_perpendicular_distance_abscissa(abscissa: float, *data) -> float:
+    """Compute cost for fitting line abscissa to maximize perpendicular distances.
+
+    This cost function optimizes the y-intercept (at a pivot radius) of a line
+    with fixed slope to maximize the mean squared perpendicular distance of
+    points within a specified band around the line. This helps find lines that
+    pass through regions of high data density in phase space.
+
     Parameters
     ----------
-    b : float
-        Fit parameter
-    *data: tuple
-        A tuple with `[r, lnv2, slope, width]`, where `slope` is the slope of 
-        the line and is fixed, and `width` is the width of a band around the 
-        line within which the distance is computed
+    abscissa : float
+        Y-intercept of the line at the pivot radius (radius_pivot). In the
+        context of velocity analysis, this represents ln(v²/v_200m²) at the
+        pivot radius. Can be positive or negative.
+    *data : tuple
+        Variable-length argument tuple containing exactly 5 elements:
+        - radius : numpy.ndarray with shape (n_particles,)
+            Scaled radial distances (r/R200m) for all particles.
+        - log_velocity_squared : numpy.ndarray with shape (n_particles,)
+            Natural log of velocity squared scaled by V200² (ln(v²/v_200m²)).
+        - slope : float
+            Fixed slope of the line in (ln(v²), r/R200m) space. Can be
+            positive, negative, or zero.
+        - width : float
+            Half-width of band around the line in same units as
+            log_velocity_squared. Only points within this perpendicular
+            distance contribute to the cost. Must be positive.
+        - radius_pivot : float
+            Pivot radius where the line has value b. Typically chosen near
+            the center of the data range for numerical stability.
 
     Returns
     -------
-    float
+    cost : float
+        Negative logarithm of mean squared perpendicular distance for points
+        within the band. Returns -ln(mean(distance²)). More negative values
+        indicate better fits (larger mean distances to maximize).
+
+    Raises
+    ------
+    ValueError
+        If data tuple doesn't contain exactly 5 elements, if arrays have
+        incompatible shapes, or if no points fall within the band.
+    TypeError
+        If inputs cannot be converted to appropriate numeric types.
+
+    Notes
+    -----
+    - Line equation: y = slope x (radius - radius_pivot) + abscissa
+    - Perpendicular distance: d = |y - line| / √(1 + slope²)
+    - Only points with d < width contribute to cost
+    - Cost is negated because we maximize distance but minimize cost
+    - Returns -∞ if no points are within the band (handled by optimizer)
+    - For steep slopes (|slope| >> 1), perpendicular distance ≈ horizontal distance
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from scipy.optimize import minimize_scalar
+    >>> 
+    >>> # Generate data with a clear ridge
+    >>> radius = np.random.uniform(0.1, 2.0, 2000)
+    >>> log_v2 = 0.3 * radius + 0.5 + np.random.normal(0, 0.2, 2000)
+    >>> 
+    >>> # Find intercept that maximizes distances within band
+    >>> data = (radius, log_v2, 0.3, 0.5, 1.0)
+    >>> result = minimize_scalar(_cost_perpendicular_distance_abscissa, 
+    ...                          args=data, method='brent')
+    >>> optimal_b = result.x
+    >>> print(f"Optimal intercept: {optimal_b:.3f}")
+
+    >>> # Visualize the fitted line
+    >>> import matplotlib.pyplot as plt
+    >>> line = 0.3 * (radius - 1.0) + optimal_b
+    >>> plt.scatter(radius, log_v2, alpha=0.3, s=1)
+    >>> plt.plot(radius, line, 'r-', linewidth=2)
+    >>> plt.xlabel('r/R200m')
+    >>> plt.ylabel('ln(v²/v_200m²)')
+    >>> plt.show()
+
+    See Also
+    --------
+    _cost_perpendicular_distance_slope : Optimize slope with fixed intercept
+    _cost_percentile : Alternative cost based on percentiles
+    scipy.optimize.minimize_scalar : Optimization routine for this cost function
     """
     radius, log_velocity_squared, slope, width, radius_pivot = data
-    line = slope * (radius - radius_pivot) + b
+    line = slope * (radius - radius_pivot) + abscissa
 
     # Perpendicular distance to the line
     distance = numpy.abs(log_velocity_squared - line) / \
@@ -1160,23 +1293,104 @@ def _cost_perpendicular_distance_abscissa(b: float, *data) -> float:
     
 
 def _cost_perpendicular_distance_slope(slope: float, *data) -> float:
-    """Cost function for slope m parameter. The optimal value of m is such
-    that the perpendicular distance of all points to the line is maximal
+    """Compute cost for fitting line slope to maximize perpendicular distances.
+
+    This cost function optimizes the slope of a line with fixed y-intercept
+    (at a pivot radius) to maximize the mean squared perpendicular distance
+    of points within a specified band around the line. This helps find the
+    optimal orientation of lines through high-density regions in phase space.
+
     Parameters
     ----------
-    m : float
-        Fit parameter
-    *data: tuple
-        A tuple with `[r, lnv2, abscissa, width]`, where `abscissa` is the value
-        at the pivot of the line and is fixed, and `width` is the width of a 
-        band around the line within which the distance is computed
+    slope : float
+        Slope of the line in (ln(v²), r/R200m) space. Represents the rate of
+        change of ln(v²/v_200m²) with respect to r/R200m. Can be positive
+        (increasing velocity with radius), negative (decreasing), or zero
+        (constant velocity).
+    *data : tuple
+        Variable-length argument tuple containing exactly 5 elements:
+        - radius : numpy.ndarray with shape (n_particles,)
+            Scaled radial distances (r/R200m) for all particles.
+        - log_velocity_squared : numpy.ndarray with shape (n_particles,)
+            Natural log of velocity squared scaled by V200² (ln(v²/v_200m²)).
+        - abscissa : float
+            Fixed y-intercept of the line at the pivot radius (radius_pivot).
+            In velocity analysis, represents ln(v²/v_200m²) at radius_pivot.
+        - width : float
+            Half-width of band around the line in same units as
+            log_velocity_squared. Only points within this perpendicular
+            distance contribute to the cost. Must be positive.
+        - radius_pivot : float
+            Pivot radius where the line has value b. Typically chosen near
+            the center of the data range for numerical stability.
 
     Returns
     -------
-    float
+    cost : float
+        Negative logarithm of mean squared perpendicular distance for points
+        within the band. Returns -ln(mean(distance²)). More negative values
+        indicate better fits (larger mean distances to maximize).
+
+    Raises
+    ------
+    ValueError
+        If data tuple doesn't contain exactly 5 elements, if arrays have
+        incompatible shapes, or if no points fall within the band.
+    TypeError
+        If inputs cannot be converted to appropriate numeric types.
+    RuntimeWarning
+        If the band contains very few points, results may be unstable.
+
+    Notes
+    -----
+    - Line equation: y = slope x (radius - radius_pivot) + abscissa
+    - Perpendicular distance: d = |y - line| / √(1 + slope²)
+    - Only points with d < width contribute to cost
+    - Cost is negated because we maximize distance but minimize cost
+    - The denominator √(1 + slope²) ensures true perpendicular distance
+    - For very steep slopes, optimization may become numerically unstable
+    - Recommended to constrain slope to reasonable physical range
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from scipy.optimize import minimize_scalar
+    >>> 
+    >>> # Generate data along a sloped line with scatter
+    >>> radius = np.random.uniform(0.1, 2.0, 2000)
+    >>> true_slope = 0.4
+    >>> log_v2 = true_slope * (radius - 1.0) + 0.3 + np.random.normal(0, 0.15, 2000)
+    >>> 
+    >>> # Find slope that maximizes distances within band
+    >>> data = (radius, log_v2, 0.3, 0.4, 1.0)
+    >>> result = minimize_scalar(_cost_perpendicular_distance_slope,
+    ...                          args=data, method='brent',
+    ...                          bounds=(-1.0, 1.0))
+    >>> optimal_slope = result.x
+    >>> print(f"True slope: {true_slope:.3f}")
+    >>> print(f"Fitted slope: {optimal_slope:.3f}")
+
+    >>> # Joint optimization of slope and intercept
+    >>> # First optimize slope with initial intercept guess
+    >>> data_slope = (radius, log_v2, 0.0, 0.4, 1.0)
+    >>> result_slope = minimize_scalar(_cost_perpendicular_distance_slope,
+    ...                                args=data_slope)
+    >>> optimal_slope = result_slope.x
+    >>> 
+    >>> # Then optimize intercept with fitted slope
+    >>> data_intercept = (radius, log_v2, optimal_slope, 0.4, 1.0)
+    >>> result_intercept = minimize_scalar(_cost_perpendicular_distance_abscissa,
+    ...                                    args=data_intercept)
+    >>> optimal_b = result_intercept.x
+
+    See Also
+    --------
+    _cost_perpendicular_distance_abscissa : Optimize intercept with fixed slope
+    _cost_percentile : Alternative cost based on percentiles
+    scipy.optimize.minimize : For joint optimization of slope and intercept
     """
-    radius, log_velocity_squared, b, width, radius_pivot = data
-    line = slope * (radius - radius_pivot) + b
+    radius, log_velocity_squared, abscissa, width, radius_pivot = data
+    line = slope * (radius - radius_pivot) + abscissa
 
     # Perpendicular distance to the line
     distance = numpy.abs(log_velocity_squared - line) / \
@@ -1261,32 +1475,147 @@ def _gradient_minima(
     diagnostics: bool = True,
     diagnostics_title: str = None,
 ) -> Tuple[numpy.ndarray]:
-    """Computes the r-lnv2 gradient and finds the minimum as a function of `r`
-    within the interval `[r_min, r_max]`
+    """Find gradient minima in kinetic energy vs radius phase space.
+
+    This function analyzes the velocity distribution as a function of radius by
+    computing histograms in radial bins within the specified range [r_min, r_max],
+    then finding the minimum of the gradient of the velocity distribution in each
+    bin. 
+
+    The algorithm proceeds as follows for each radial bin:
+    1. Histogram the log_velocity_squared values
+    2. Compute the gradient of the histogram counts
+    3. Apply Gaussian smoothing to the gradient
+    4. Find the minimum of the smoothed gradient
 
     Parameters
     ----------
-    r : numpy.ndarray
-        Radial separation
-    lnv2 : numpy.ndarray
-        Log-kinetic energy
-    mask_vr : numpy.ndarray
-        Mask for the selection of radial velocity
+    radius : numpy.ndarray
+        Scaled radial distances (r/R200m) with shape (n_particles,).
+        Values should typically be in range [0, 3]. Must be non-negative.
+    log_velocity_squared : numpy.ndarray
+        Natural log of velocity squared scaled by V200² with shape (n_particles,).
+        Values ln(v²/v_200m²) typically range from -3 to +3.
     n_points : int
-        Number of minima points to compute
+        Number of radial bins to compute gradient minima in. Must be positive.
+        Typical values are 10-50. More points give finer radial resolution
+        but require more particles for stable statistics.
     r_min : float
-        Minimum radial distance
+        Minimum radius for analysis in units of R200m. Must be non-negative
+        and less than r_max. Typical value is 0.0 or 0.2.
     r_max : float
-        Maximum radial distance
+        Maximum radius for analysis in units of R200m. Must be positive and
+        greater than r_min. Typical value is 0.5.
+    save_path : str
+        Directory path where diagnostic plots will be saved. Must be a valid
+        directory path with write permissions. Plot saved as
+        'gradient_minima_{diagnostics_title}.png' or 'gradient_minima.png'.
+    n_bins : int, optional
+        Number of bins for velocity histograms within each radial bin.
+        Must be positive. Default is 200. More bins give finer resolution
+        but require more particles for stable statistics.
+    sigma_smooth : float, optional
+        Standard deviation for Gaussian smoothing kernel applied to gradient.
+        Must be non-negative. Default is 1.5. Larger values produce smoother
+        gradients but may obscure fine structure.
+    diagnostics : bool, optional
+        Whether to generate diagnostic plots showing histograms, gradients,
+        and identified minima. Default is True.
+    diagnostics_title : str, optional
+        Additional identifier for diagnostic plot filename. If None, uses
+        default filename. Default is None.
 
     Returns
     -------
-    tuple[numpy.ndarray]
-        Radial and minima coordinates.
+    radial_bins : numpy.ndarray
+        Center positions of radial bins with shape (n_points,). Values are
+        in units of R200m and span [r_min, r_max].
+    counts_gradient_minima : numpy.ndarray
+        Velocity values at gradient minima for each radial bin with shape
+        (n_points,). Values are ln(v²/v_200m²) and identify boundaries in
+        velocity space as a function of radius.
+
+    Raises
+    ------
+    ValueError
+        If array shapes are incompatible, if r_min >= r_max, if n_points or
+        n_bins are non-positive, or if radius/log_velocity_squared contain
+        invalid values.
+    TypeError
+        If inputs cannot be converted to appropriate numeric types.
+    OSError
+        If save_path doesn't exist or lacks write permissions when diagnostics=True.
+    RuntimeWarning
+        If radial bins contain very few particles, statistics may be unreliable.
+
+    Notes
+    -----
+    - The gradient is normalized by its maximum absolute value in each bin
+    - Only positive log_velocity_squared values are considered when finding minima
+    - The smoothing kernel helps avoid spurious minima from statistical noise
+    - Empty radial bins will have undefined gradient minima (NaN or zero)
+    - The method is most reliable with >100 particles per radial bin
+    - Diagnostic plots show: counts, gradient, smoothed gradient, and minima
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> 
+    >>> # Generate sample phase space data
+    >>> n_particles = 10000
+    >>> radius = np.random.uniform(0.1, 2.5, n_particles)
+    >>> # Create bimodal velocity distribution
+    >>> log_v2 = np.where(radius < 1.0,
+    ...                   np.random.normal(0.5, 0.3, n_particles),
+    ...                   np.random.normal(-0.2, 0.4, n_particles))
+    >>> 
+    >>> # Find gradient minima
+    >>> r_bins, v_minima = _gradient_minima(
+    ...     radius=radius,
+    ...     log_velocity_squared=log_v2,
+    ...     n_points=20,
+    ...     r_min=0.1,
+    ...     r_max=2.5,
+    ...     save_path="/output/",
+    ...     diagnostics=True
+    ... )
+    >>> 
+    >>> # Plot the boundary
+    >>> import matplotlib.pyplot as plt
+    >>> plt.scatter(radius, log_v2, alpha=0.1, s=1)
+    >>> plt.plot(r_bins, v_minima, 'r-', linewidth=2, label='Boundary')
+    >>> plt.xlabel('r/R200m')
+    >>> plt.ylabel('ln(v²/v_200m²)')
+    >>> plt.legend()
+    >>> plt.show()
+
+    >>> # Use for splashback radius identification
+    >>> # Find where gradient minimum crosses zero velocity
+    >>> zero_crossings = np.where(np.diff(np.sign(v_minima)))[0]
+    >>> if len(zero_crossings) > 0:
+    ...     r_splash = r_bins[zero_crossings[0]]
+    ...     print(f"Splashback radius: {r_splash:.2f} R200m")
+
+    See Also
+    --------
+    _diagnostic_gradient_minima_plot : Creates visualization of results
+    scipy.ndimage.gaussian_filter : Gaussian smoothing implementation
+    numpy.gradient : Gradient computation
     """
+    # Validate inputs
+    _validate_inputs_positive_number_non_zero(n_points, 'n_points')
+    _validate_inputs_positive_number(r_min, 'r_min')
+    _validate_inputs_positive_number_non_zero(n_bins, 'n_bins')
+    _validate_inputs_positive_number_non_zero(sigma_smooth, 'sigma_smooth')
+
+    if r_min >= r_max:
+        raise ValueError('r_max must be larger than r_min')
+
+    # Compute radial bins and initialize empty container for gradient minima
     radius_edges = numpy.linspace(r_min, r_max, n_points + 1)
     counts_gradient_minima = numpy.zeros(n_points)
 
+    # Initialize empty containers for diagnostic plot even if diagnostics = False
     log_velocity_squared_bins_out = numpy.zeros((n_points, n_bins))
     counts_out = numpy.zeros((n_points, n_bins))
     counts_gradient_out = numpy.zeros((n_points, n_bins))
@@ -1353,8 +1682,106 @@ def _hist2d_mesh(
     limits: tuple,
     n_bins: int,
     gradient: bool = False,
-):
-    """Compute the gradient of y in bins of x"""
+) -> Tuple[numpy.ndarray]:
+    """Compute 2D histogram with optional gradient for phase space analysis.
+
+    This function creates a 2D histogram of (x, y) data and optionally computes
+    the gradient of the histogram density with respect to y in each x bin.
+    Returns meshgrid arrays suitable for contour plots and gradient analysis.
+    Useful for analyzing phase space distributions and identifying boundaries.
+
+    Parameters
+    ----------
+    x : numpy.ndarray
+        X-coordinates of data points with shape (n_points,). Typically
+        represents radial distance (r/R200m) in halo analysis.
+    y : numpy.ndarray
+        Y-coordinates of data points with shape (n_points,). Typically
+        represents velocity quantities (ln(v²/v_200m²)) in halo analysis.
+    limits : tuple
+        2D histogram limits as ((x_min, x_max), (y_min, y_max)). Must be
+        a tuple of two tuples, each containing two floats. Defines the
+        rectangular region for histogram computation.
+    n_bins : int
+        Number of bins in each dimension. Must be positive. The total number
+        of bins in the 2D histogram is n_bins². Typical values are 50-200.
+    gradient : bool, optional
+        Whether to compute gradient of density with respect to y in each x bin.
+        If True, returns gradient array instead of density. Default is False.
+
+    Returns
+    -------
+    x_mesh : numpy.ndarray
+        X-coordinates of bin centers with shape (n_bins, n_bins). Created by
+        numpy.meshgrid for use in contour/surface plots.
+    y_mesh : numpy.ndarray
+        Y-coordinates of bin centers with shape (n_bins, n_bins). Created by
+        numpy.meshgrid for use in contour/surface plots.
+    z : numpy.ndarray
+        If gradient=False: 2D histogram density with shape (n_bins, n_bins).
+            Values are normalized probability densities.
+        If gradient=True: Gradient of density with respect to y with shape
+            (n_bins, n_bins). Values are ∂ρ/∂y for each x bin.
+
+    Raises
+    ------
+    ValueError
+        If x and y have different shapes, if limits tuple has wrong structure,
+        or if n_bins is non-positive.
+    TypeError
+        If inputs cannot be converted to appropriate numeric types.
+
+    Notes
+    -----
+    - Histogram is computed using numpy.histogram2d with density=True
+    - Bin centers are computed as midpoints between edges
+    - Gradient is computed using numpy.gradient along y-axis for each x bin
+    - Empty bins will have zero density/gradient
+    - Meshgrids follow numpy convention: first index is x, second is y
+    - The gradient computation uses mean bin width for numerical derivative
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> import matplotlib.pyplot as plt
+    >>> 
+    >>> # Generate sample phase space data
+    >>> n_points = 5000
+    >>> x = np.random.uniform(0, 2, n_points)
+    >>> y = 0.5 * x + np.random.normal(0, 0.3, n_points)
+    >>> 
+    >>> # Compute 2D histogram
+    >>> limits = ((0, 2), (-1, 2))
+    >>> x_mesh, y_mesh, density = _hist2d_mesh(x, y, limits, n_bins=100)
+    >>> 
+    >>> # Plot density
+    >>> plt.contourf(x_mesh, y_mesh, density.T, levels=20)
+    >>> plt.colorbar(label='Density')
+    >>> plt.xlabel('r/R200m')
+    >>> plt.ylabel('ln(v²/v_200m²)')
+    >>> plt.show()
+
+    >>> # Compute and plot gradient
+    >>> x_mesh, y_mesh, grad = _hist2d_mesh(x, y, limits, n_bins=100, 
+    ...                                     gradient=True)
+    >>> plt.contourf(x_mesh, y_mesh, grad.T, levels=20, cmap='RdBu_r')
+    >>> plt.colorbar(label='∂ρ/∂y')
+    >>> plt.xlabel('r/R200m')
+    >>> plt.ylabel('ln(v²/v_200m²)')
+    >>> plt.show()
+
+    >>> # Find ridges in phase space (where gradient ≈ 0)
+    >>> ridge_mask = np.abs(grad) < 0.1
+    >>> plt.scatter(x_mesh[ridge_mask], y_mesh[ridge_mask], c='red', s=1)
+
+    See Also
+    --------
+    numpy.histogram2d : Underlying 2D histogram computation
+    numpy.gradient : Gradient computation method
+    numpy.meshgrid : Meshgrid creation for plotting
+    _gradient_minima : Alternative method for finding boundaries
+    """
+    
     hist_z, hist_x, hist_y = numpy.histogram2d(x, y, bins=n_bins, range=limits,
                                                density=True)
 
@@ -1379,6 +1806,106 @@ def _hist2d_mesh(
 
 
 def _smooth_2d_hist(arr: numpy.ndarray, sigma: float = 2.0) -> numpy.ndarray:
+    """Apply Gaussian smoothing to 2D histogram for noise reduction.
+
+    This function smooths a 2D array (typically a histogram or density map) using
+    a Gaussian filter. Smoothing reduces statistical noise and makes underlying
+    structures more visible, which is useful for feature detection and boundary
+    identification in phase space distributions.
+
+    Parameters
+    ----------
+    arr : numpy.ndarray
+        2D array to smooth, typically with shape (n_bins, n_bins). Usually
+        represents a histogram density or gradient field. Can contain any
+        numeric values including zeros and NaNs (which will be smoothed).
+    sigma : float, optional
+        Standard deviation of the Gaussian kernel in bin units. Must be
+        non-negative. Default is 2.0. Larger values produce stronger smoothing:
+        - sigma < 1: Minimal smoothing, preserves fine structure
+        - sigma = 1-3: Moderate smoothing, good for most applications
+        - sigma > 5: Strong smoothing, may obscure real features
+
+    Returns
+    -------
+    arr_smooth : numpy.ndarray
+        Smoothed 2D array with same shape as input. Values are weighted averages
+        of neighboring bins using Gaussian kernel. Edge effects are handled by
+        scipy's boundary conditions (typically reflection).
+
+    Raises
+    ------
+    ValueError
+        If arr is not 2-dimensional or if sigma is negative.
+    TypeError
+        If arr cannot be converted to numpy array or sigma is not numeric.
+
+    Notes
+    -----
+    - Uses scipy.ndimage.gaussian_filter for efficient computation
+    - The Gaussian kernel has standard deviation sigma in array index units
+    - Effective smoothing radius is approximately 3×sigma bins
+    - Smoothing is applied equally in both dimensions
+    - Edge effects are handled by reflecting values across boundaries
+    - NaN values are propagated through smoothing (consider masking first)
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> import matplotlib.pyplot as plt
+    >>> 
+    >>> # Create noisy 2D histogram
+    >>> np.random.seed(42)
+    >>> x = np.random.uniform(0, 2, 5000)
+    >>> y = 0.3 * x + np.random.normal(0, 0.2, 5000)
+    >>> hist, x_edges, y_edges = np.histogram2d(x, y, bins=50, 
+    ...                                         range=((0, 2), (-1, 1)))
+    >>> 
+    >>> # Add noise to simulate low statistics
+    >>> hist_noisy = hist + np.random.poisson(2, hist.shape)
+    >>> 
+    >>> # Apply smoothing
+    >>> hist_smooth = _smooth_2d_hist(hist_noisy, sigma=2.0)
+    >>> 
+    >>> # Compare original and smoothed
+    >>> fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+    >>> im1 = axes[0].imshow(hist_noisy.T, origin='lower', aspect='auto')
+    >>> axes[0].set_title('Noisy histogram')
+    >>> plt.colorbar(im1, ax=axes[0])
+    >>> 
+    >>> im2 = axes[1].imshow(hist_smooth.T, origin='lower', aspect='auto')
+    >>> axes[1].set_title('Smoothed histogram')
+    >>> plt.colorbar(im2, ax=axes[1])
+    >>> plt.show()
+
+    >>> # Effect of different sigma values
+    >>> sigmas = [0.5, 1.0, 2.0, 5.0]
+    >>> fig, axes = plt.subplots(1, 4, figsize=(16, 4))
+    >>> for ax, sigma in zip(axes, sigmas):
+    ...     smoothed = _smooth_2d_hist(hist_noisy, sigma=sigma)
+    ...     ax.imshow(smoothed.T, origin='lower', aspect='auto')
+    ...     ax.set_title(f'σ = {sigma}')
+    >>> plt.tight_layout()
+    >>> plt.show()
+
+    >>> # Smoothing gradient fields
+    >>> # Compute gradient of density
+    >>> grad_y = np.gradient(hist, axis=1)
+    >>> grad_y_smooth = _smooth_2d_hist(grad_y, sigma=1.5)
+    >>> 
+    >>> # Smoothed gradients are better for finding features
+    >>> plt.imshow(grad_y_smooth.T, origin='lower', aspect='auto', cmap='RdBu_r')
+    >>> plt.colorbar(label='Smoothed ∂ρ/∂y')
+    >>> plt.title('Smoothed density gradient')
+    >>> plt.show()
+
+    See Also
+    --------
+    scipy.ndimage.gaussian_filter : Underlying smoothing implementation
+    _hist2d_mesh : Creates 2D histograms for smoothing
+    scipy.ndimage.uniform_filter : Alternative box-car smoothing
+    scipy.signal.wiener : Adaptive Wiener filtering for noise reduction
+    """
     arr_smooth = gaussian_filter(arr, sigma=sigma)
     return arr_smooth
 
