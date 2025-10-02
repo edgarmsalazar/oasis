@@ -910,6 +910,7 @@ def get_calibration_data(
     save_path: str,
     particle_mass: float,
     mass_density: float,
+    redshift: float,
     isolation_factor: float = 0.2,
     isolation_radius_factor: float = 2.0,
     n_threads: int = None,
@@ -1070,6 +1071,10 @@ def get_calibration_data(
         radius = results[:, 0]
         radial_velocity = results[:, 1]
         log_velocity_squared = results[:, 2]
+
+        if redshift > 0.:
+            a = 1 / (1 + redshift)
+            log_velocity_squared += numpy.log(a**2)
 
         with h5py.File(file_name, 'w') as hdf:
             hdf.create_dataset('r', data=radius)
@@ -1495,6 +1500,7 @@ def self_calibration(
     save_path: str,
     particle_mass: float,
     mass_density: float,
+    redshift: float,
     n_points: int = 20,
     percent: float = 0.995,
     width: float = 0.05,
@@ -1546,12 +1552,12 @@ def self_calibration(
         save_path=save_path,
         particle_mass=particle_mass,
         mass_density=mass_density,
+        redshift=redshift,
         n_threads=n_threads,
         isolation_factor=isolation_factor,
         isolation_radius_factor=isolation_radius_factor,
         diagnostics=diagnostics,
     )
-    print(radius.shape)
 
     mask_negative_vr = (radial_velocity < 0)
     mask_positive_vr = ~mask_negative_vr
@@ -1614,7 +1620,7 @@ def self_calibration(
     result = minimize(
         fun=_cost_perpendicular_distance,
         x0=0.8 * abscissa_n,
-        bounds=((0.5 * abscissa_n, abscissa_n),),
+        bounds=((0., abscissa_n),),
         args=(radius[mask_negative_vr], log_velocity_squared[mask_negative_vr],
               slope_negative_vr, width, radius_pivot),
         method='Nelder-Mead',
