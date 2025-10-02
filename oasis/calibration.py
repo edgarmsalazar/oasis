@@ -1621,7 +1621,7 @@ def self_calibration(
     # 'width' distance from the line (ignoring all others).
     result = minimize(
         fun=_cost_perpendicular_distance,
-        x0=0.8 * abscissa_n,
+        x0=0.5 * abscissa_n,
         bounds=((0., abscissa_n),),
         args=(radius[mask_negative_vr], log_velocity_squared[mask_negative_vr],
               slope_negative_vr, width, radius_pivot),
