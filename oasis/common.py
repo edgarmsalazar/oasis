@@ -84,7 +84,7 @@ def timer(
             remaining_seconds = elapsed % 3600
             minutes = int(remaining_seconds // 60)
             seconds = remaining_seconds % 60
-            elapsed_str = f"{hours:02d}:{minutes:02d}:{seconds:.{precision}f}"
+            elapsed_str = f"{hours:02d}:{minutes:02d}:{seconds:02.{precision}f}"
 
             if fancy:
                 print(
