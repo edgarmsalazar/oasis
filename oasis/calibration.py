@@ -8,6 +8,7 @@ from matplotlib import pyplot
 from matplotlib.colorbar import ColorbarBase
 from scipy.ndimage import gaussian_filter
 from scipy.optimize import curve_fit, minimize
+from scipy.stats import iqr as interquartile_range
 from tqdm import tqdm
 
 from oasis.common import (G_GRAVITY, _validate_inputs_boxsize_minisize,
@@ -1053,7 +1054,7 @@ def get_calibration_data(
     h5py.File : HDF5 file interface for data persistence
     """
     file_name = save_path + 'calibration_data.hdf5'
-    _validate_inputs_positive_number_non_zero(redshift, 'redshift')
+    _validate_inputs_positive_number(redshift, 'redshift')
 
     try:
         with h5py.File(file_name, 'r') as hdf:
@@ -1470,8 +1471,8 @@ def _gradient_minima(
     r_min: float,
     r_max: float,
     save_path: str,
-    n_bins: int = 200,
     sigma_smooth: float = 1.5,
+    lnvsq_lims: tuple = (-2.0, 2.5),
     diagnostics: bool = True,
     diagnostics_title: str = None,
 ) -> Tuple[numpy.ndarray]:
@@ -1510,14 +1511,13 @@ def _gradient_minima(
         Directory path where diagnostic plots will be saved. Must be a valid
         directory path with write permissions. Plot saved as
         'gradient_minima_{diagnostics_title}.png' or 'gradient_minima.png'.
-    n_bins : int, optional
-        Number of bins for velocity histograms within each radial bin.
-        Must be positive. Default is 200. More bins give finer resolution
-        but require more particles for stable statistics.
     sigma_smooth : float, optional
         Standard deviation for Gaussian smoothing kernel applied to gradient.
         Must be non-negative. Default is 1.5. Larger values produce smoother
         gradients but may obscure fine structure.
+    lnvsq_lims : tuple, optional
+        Lower and upper bounds for log_velocity_squared at each radial bin. 
+        Default is (-2.0, 2.5).
     diagnostics : bool, optional
         Whether to generate diagnostic plots showing histograms, gradients,
         and identified minima. Default is True.
@@ -1605,11 +1605,17 @@ def _gradient_minima(
     # Validate inputs
     _validate_inputs_positive_number_non_zero(n_points, 'n_points')
     _validate_inputs_positive_number(r_min, 'r_min')
-    _validate_inputs_positive_number_non_zero(n_bins, 'n_bins')
     _validate_inputs_positive_number_non_zero(sigma_smooth, 'sigma_smooth')
 
     if r_min >= r_max:
         raise ValueError('r_max must be larger than r_min')
+
+    mask = (radius >= r_min) & (radius <= r_max)
+    iqr = interquartile_range(log_velocity_squared[mask], scale='normal')
+    # Silvermann's rule of thumb.
+    h = 0.9 * numpy.min([numpy.std(log_velocity_squared[mask]), iqr]) * \
+        mask.sum()**(-0.2)
+    n_bins = int(numpy.ceil((lnvsq_lims[1] - lnvsq_lims[0]) / h))
 
     # Compute radial bins and initialize empty container for gradient minima
     radius_edges = numpy.linspace(r_min, r_max, n_points + 1)
@@ -1628,7 +1634,7 @@ def _gradient_minima(
 
         # Compute histogram of lnv2 values within the r bin and the vr mask
         counts, log_velocity_squared_edges = numpy.histogram(
-            log_velocity_squared[radius_mask], bins=n_bins)
+            log_velocity_squared[radius_mask], bins=numpy.linspace(*lnvsq_lims, n_bins+1))
 
         # Compute the gradient of the histogram
         counts_gradient = numpy.gradient(
@@ -2148,9 +2154,16 @@ def self_calibration(
         diagnostics=diagnostics,
         diagnostics_title=r'Positive $v_r$ slope calibration',
     )
+
+    # Mask outliers
+    abs_dev = numpy.abs(gradient_minumum_positive - numpy.median(gradient_minumum_positive))
+    median_abs_dev = 1.4286 * numpy.median(abs_dev)
+    mask_outliers = abs_dev <= 3. * median_abs_dev
+    
     # Find slope by fitting to the minima.
-    (slope_positive_vr, abscissa_p), _ = curve_fit(line_model, radial_bins_positive,
-                                                   gradient_minumum_positive,
+    (slope_positive_vr, abscissa_p), _ = curve_fit(line_model, 
+                                                   radial_bins_positive[mask_outliers],
+                                                   gradient_minumum_positive[mask_outliers],
                                                    p0=[-1, 2], bounds=((-5, 0), (0, 5)))
 
     # Find intercept by finding the value that contains 'perc' percent of
@@ -2181,10 +2194,17 @@ def self_calibration(
         diagnostics=diagnostics,
         diagnostics_title=r'Negative $v_r$ slope calibration',
     )
+
+    # Mask outliers
+    abs_dev = numpy.abs(gradient_minumum_negative - numpy.median(gradient_minumum_negative))
+    median_abs_dev = 1.4286 * numpy.median(abs_dev)
+    mask_outliers = abs_dev <= 3. * median_abs_dev
+
     # Find slope by fitting to the minima.
-    (slope_n, abscissa_n), _ = curve_fit(line_model, radial_bins_negative,
-                                                   gradient_minumum_negative,
-                                                   p0=[-1, 2], bounds=((-5, 0), (0, 3)))
+    (slope_n, abscissa_n), _ = curve_fit(line_model, 
+                                         radial_bins_negative[mask_outliers],
+                                         gradient_minumum_negative[mask_outliers],
+                                         p0=[-1, 2], bounds=((-5, 0), (0, 3)))
     
     # The user input width is scaled with redshift such that it is double at 
     # z = 3. This was needed due to the numerical noise in the cost function 
