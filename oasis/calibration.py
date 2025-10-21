@@ -930,6 +930,7 @@ def get_calibration_data(
     isolation_radius_factor: float = 2.0,
     n_threads: int = None,
     diagnostics: bool = True,
+    overwrite: bool = False,
 ) -> Tuple[numpy.ndarray]:
     """Generate or load calibration data from isolated massive seed halos.
 
@@ -985,6 +986,8 @@ def get_calibration_data(
     diagnostics : bool, optional
         Whether to generate diagnostic plots of the calibration data.
         Default is True.
+    overwrite : bool, optional
+        Whether to overwrite the existing calibration data. Default is False.
 
     Returns
     -------
@@ -1068,13 +1071,20 @@ def get_calibration_data(
     """
     file_name = save_path + 'calibration_data.hdf5'
     _validate_inputs_positive_number(redshift, 'redshift')
+    
+    # Flag to trigger except clause given the overwrite flag.
+    execute_fallback = overwrite
 
-    try:
-        with h5py.File(file_name, 'r') as hdf:
-            radius = hdf['r'][()]
-            radial_velocity = hdf['vr'][()]
-            log_velocity_squared = hdf['lnv2'][()]
-    except:
+    if not execute_fallback:
+        try:
+            with h5py.File(file_name, 'r') as hdf:
+                radius = hdf['r'][()]
+                radial_velocity = hdf['vr'][()]
+                log_velocity_squared = hdf['lnv2'][()]
+        except:
+            execute_fallback = True
+    
+    if execute_fallback:
         results = _select_candidate_seeds(
             n_seeds=n_seeds,
             seed_data=seed_data,
@@ -2183,7 +2193,8 @@ def self_calibration(
     isolation_factor: float = 0.2,
     isolation_radius_factor: float = 2.0,
     n_threads: int = None,
-    diagnostics: bool = True
+    diagnostics: bool = True,
+    overwrite: bool = False,
 ) -> None:
     """Runs calibration from isolated halo samples.
 
@@ -2263,6 +2274,8 @@ def self_calibration(
     diagnostics : bool, optional
         Whether to generate diagnostic plots of calibration process and results.
         Default is True. Plots saved to save_path.
+    overwrite : bool, optional
+        Whether to overwrite the existing calibration data. Default is False.
 
     Returns
     -------
@@ -2397,6 +2410,7 @@ def self_calibration(
         isolation_factor=isolation_factor,
         isolation_radius_factor=isolation_radius_factor,
         diagnostics=diagnostics,
+        overwrite=overwrite,
     )
 
     mask_negative_vr = (radial_velocity < 0)
