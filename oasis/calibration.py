@@ -1404,28 +1404,13 @@ def _cost_perpendicular_distance_slope(slope: float, *data) -> float:
     scipy.optimize.minimize : For joint optimization of slope and intercept
     """
     radius, log_velocity_squared, abscissa, width, radius_pivot = data
+    line = slope * (radius - radius_pivot) + abscissa
 
-    # Mask points by their radius above the pivot value
-    radius_mask = radius >= radius_pivot
-
-    # Find distance between points above the pivot and the line
-    line = slope * (radius[radius_mask] - radius_pivot) + abscissa
-    distance_line = numpy.abs(log_velocity_squared[radius_mask] - line) / \
+    # Perpendicular distance to the line
+    distance = numpy.abs(log_velocity_squared - line) / \
         numpy.sqrt(1 + slope**2)
 
-    # Find distance between points below the pivot and the parabola
-    gamma = 2.
-    b_neg = abscissa - slope * radius_pivot
-    alpha = (gamma - b_neg) / radius_pivot**2
-    beta = slope - 2 * alpha * radius_pivot
-    x_min = (radius[~radius_mask] - beta) / (2. * alpha + 1.)
-
-    curve = alpha * (x_min)**2 + beta * x_min + gamma
-    distance_curve = numpy.sqrt((x_min - radius[~radius_mask])**2 + \
-                                (curve - log_velocity_squared[~radius_mask])**2)
-    
     # Select only elements within the width of the band
-    distance = numpy.concatenate([distance_curve, distance_line])
     distance_within_band = distance[(distance < width)]
 
     # Cost to maximize (thus negative)
