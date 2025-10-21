@@ -9,6 +9,7 @@ from matplotlib.colorbar import ColorbarBase
 from scipy.ndimage import gaussian_filter
 from scipy.optimize import curve_fit, minimize
 from scipy.stats import iqr as interquartile_range
+# from scipy.spatial import cKDTree
 from tqdm import tqdm
 
 from oasis.common import (G_GRAVITY, _validate_inputs_boxsize_minisize,
@@ -439,6 +440,9 @@ def _find_isolated_seeds(
     isolation_radii = isolation_radius_factor * radius
     max_neighbor_masses = isolation_factor * mass
 
+    # Compute KDTree with seed positions.
+    # position_tree = cKDTree(position)
+
     for i in range(n_seeds):
         # If all requested isolated seeds have been found, exit loop
         if len(isolated_indices) >= max_seeds:
@@ -456,12 +460,21 @@ def _find_isolated_seeds(
         # Exclude self (distance = 0) and find neighbors within isolation radius
         neighbor_mask = (distances > 0) & (distances <= isolation_radius)
 
+        # # Use a KDTree to find neighbouring seeds.
+        # idx_neighbor = position_tree.query_ball_point(current_position, 
+        #                                               isolation_radius,
+        #                                               return_sorted=True)
+        # idx_neighbor = [item for item in idx_neighbor if item != i]
+        # idx_neighbor = idx_neighbor[idx_neighbor != i]
+
         # No neighbors found - seed is isolated
         if not numpy.any(neighbor_mask):
+        # if len(idx_neighbor) == 0:
             isolated_indices.append(i)
             continue
 
         neighbor_masses = mass[neighbor_mask]
+        # neighbor_masses = mass[idx_neighbor]
 
         # Check isolation criterion: all neighbors must have mass < threshold
         if numpy.all(neighbor_masses < max_neighbor_mass):
@@ -1391,13 +1404,28 @@ def _cost_perpendicular_distance_slope(slope: float, *data) -> float:
     scipy.optimize.minimize : For joint optimization of slope and intercept
     """
     radius, log_velocity_squared, abscissa, width, radius_pivot = data
-    line = slope * (radius - radius_pivot) + abscissa
 
-    # Perpendicular distance to the line
-    distance = numpy.abs(log_velocity_squared - line) / \
+    # Mask points by their radius above the pivot value
+    radius_mask = radius >= radius_pivot
+
+    # Find distance between points above the pivot and the line
+    line = slope * (radius[radius_mask] - radius_pivot) + abscissa
+    distance_line = numpy.abs(log_velocity_squared[radius_mask] - line) / \
         numpy.sqrt(1 + slope**2)
 
+    # Find distance between points below the pivot and the parabola
+    gamma = 2.
+    b_neg = abscissa - slope * radius_pivot
+    alpha = (gamma - b_neg) / radius_pivot**2
+    beta = slope - 2 * alpha * radius_pivot
+    x_min = (radius[~radius_mask] - beta) / (2. * alpha + 1.)
+
+    curve = alpha * (x_min)**2 + beta * x_min + gamma
+    distance_curve = numpy.sqrt((x_min - radius[~radius_mask])**2 + \
+                                (curve - log_velocity_squared[~radius_mask])**2)
+    
     # Select only elements within the width of the band
+    distance = numpy.concatenate([distance_curve, distance_line])
     distance_within_band = distance[(distance < width)]
 
     # Cost to maximize (thus negative)
@@ -1476,18 +1504,24 @@ def _gradient_minima(
     diagnostics: bool = True,
     diagnostics_title: str = None,
 ) -> Tuple[numpy.ndarray]:
-    """Find gradient minima in kinetic energy vs radius phase space.
+    """Find gradient minima in velocity-radius phase space to identify boundaries.
 
     This function analyzes the velocity distribution as a function of radius by
-    computing histograms in radial bins within the specified range [r_min, r_max],
-    then finding the minimum of the gradient of the velocity distribution in each
-    bin. 
+    computing histograms in radial bins, then finding the minimum of the gradient
+    of the velocity distribution in each bin. These minima correspond to boundaries
+    or edges in the phase space distribution, useful for identifying distinct
+    kinematic populations (e.g., splashback radius, infall region boundaries).
 
     The algorithm proceeds as follows for each radial bin:
-    1. Histogram the log_velocity_squared values
+    1. Histogram the log_velocity_squared values using automatic bin width
     2. Compute the gradient of the histogram counts
     3. Apply Gaussian smoothing to the gradient
-    4. Find the minimum of the smoothed gradient
+    4. Find the minimum of the smoothed gradient for positive velocities
+    5. This minimum represents a boundary in velocity space
+
+    The number of velocity bins is automatically determined using Silverman's
+    rule of thumb for optimal histogram bin width, based on the data within
+    the specified radial range [r_min, r_max].
 
     Parameters
     ----------
@@ -1498,32 +1532,37 @@ def _gradient_minima(
         Natural log of velocity squared scaled by V200² with shape (n_particles,).
         Values ln(v²/v_200m²) typically range from -3 to +3.
     n_points : int
-        Number of radial bins to compute gradient minima in. Must be positive.
-        Typical values are 10-50. More points give finer radial resolution
-        but require more particles for stable statistics.
+        Number of radial bins to compute gradient minima in. Must be positive
+        and non-zero. Typical values are 10-50. More points give finer radial
+        resolution but require more particles for stable statistics.
     r_min : float
         Minimum radius for analysis in units of R200m. Must be non-negative
         and less than r_max. Typical value is 0.0 or 0.2.
     r_max : float
         Maximum radius for analysis in units of R200m. Must be positive and
-        greater than r_min. Typical value is 0.5.
+        greater than r_min. Typical value is 0.5 for calibration or 2.5 for
+        broader analysis.
     save_path : str
         Directory path where diagnostic plots will be saved. Must be a valid
         directory path with write permissions. Plot saved as
         'gradient_minima_{diagnostics_title}.png' or 'gradient_minima.png'.
     sigma_smooth : float, optional
         Standard deviation for Gaussian smoothing kernel applied to gradient.
-        Must be non-negative. Default is 1.5. Larger values produce smoother
-        gradients but may obscure fine structure.
+        Must be positive and non-zero. Default is 1.5. Larger values produce
+        smoother gradients but may obscure fine structure. Typical range is
+        [1.0, 3.0].
     lnvsq_lims : tuple, optional
-        Lower and upper bounds for log_velocity_squared at each radial bin. 
-        Default is (-2.0, 2.5).
+        Lower and upper bounds (min, max) for log_velocity_squared histogram
+        range, as a tuple of two floats. Default is (-2.0, 2.5). This range
+        should encompass all relevant velocity data. Used with automatic bin
+        width calculation to determine number of bins.
     diagnostics : bool, optional
         Whether to generate diagnostic plots showing histograms, gradients,
         and identified minima. Default is True.
     diagnostics_title : str, optional
         Additional identifier for diagnostic plot filename. If None, uses
-        default filename. Default is None.
+        default filename 'gradient_minima.png'. If provided, saves as
+        'gradient_minima_{diagnostics_title}.png'. Default is None.
 
     Returns
     -------
@@ -1538,11 +1577,12 @@ def _gradient_minima(
     Raises
     ------
     ValueError
-        If array shapes are incompatible, if r_min >= r_max, if n_points or
-        n_bins are non-positive, or if radius/log_velocity_squared contain
-        invalid values.
+        If array shapes are incompatible, if r_min >= r_max, if n_points is
+        non-positive, if sigma_smooth is non-positive, or if
+        radius/log_velocity_squared contain invalid values.
     TypeError
-        If inputs cannot be converted to appropriate numeric types.
+        If inputs cannot be converted to appropriate numeric types, or if
+        lnvsq_lims is not a tuple/sequence.
     OSError
         If save_path doesn't exist or lacks write permissions when diagnostics=True.
     RuntimeWarning
@@ -1550,12 +1590,39 @@ def _gradient_minima(
 
     Notes
     -----
+    **Automatic Bin Width Selection**:
+    
+    The number of velocity bins is automatically computed using Silverman's
+    rule of thumb:
+    
+    h = 0.9 * min(σ, IQR/1.34) * n^(-1/5)
+    
+    where:
+    - h is the optimal bin width
+    - σ is the standard deviation of log_velocity_squared in [r_min, r_max]
+    - IQR is the interquartile range (scaled to normal distribution)
+    - n is the number of particles in [r_min, r_max]
+    
+    Number of bins = ceil((lnvsq_lims[1] - lnvsq_lims[0]) / h)
+    
+    This adaptive approach ensures appropriate resolution for different
+    data distributions and sample sizes.
+    
+    **Algorithm Details**:
+    
     - The gradient is normalized by its maximum absolute value in each bin
     - Only positive log_velocity_squared values are considered when finding minima
     - The smoothing kernel helps avoid spurious minima from statistical noise
-    - Empty radial bins will have undefined gradient minima (NaN or zero)
+    - Empty radial bins will have undefined gradient minima (may be NaN or zero)
     - The method is most reliable with >100 particles per radial bin
     - Diagnostic plots show: counts, gradient, smoothed gradient, and minima
+    
+    **Velocity Range Masking**:
+    
+    Before finding the minimum, the algorithm masks to only consider positive
+    velocity values (log_velocity_squared > 0). This ensures the identified
+    boundary corresponds to kinematically significant features rather than
+    low-velocity artifacts.
 
     Examples
     --------
@@ -1569,13 +1636,13 @@ def _gradient_minima(
     ...                   np.random.normal(0.5, 0.3, n_particles),
     ...                   np.random.normal(-0.2, 0.4, n_particles))
     >>> 
-    >>> # Find gradient minima
+    >>> # Find gradient minima with default parameters
     >>> r_bins, v_minima = _gradient_minima(
     ...     radius=radius,
     ...     log_velocity_squared=log_v2,
     ...     n_points=20,
-    ...     r_min=0.1,
-    ...     r_max=2.5,
+    ...     r_min=0.2,
+    ...     r_max=0.5,
     ...     save_path="/output/",
     ...     diagnostics=True
     ... )
@@ -1589,6 +1656,34 @@ def _gradient_minima(
     >>> plt.legend()
     >>> plt.show()
 
+    >>> # Calibration for positive radial velocity
+    >>> r_bins_pos, v_minima_pos = _gradient_minima(
+    ...     radius=radius[radial_velocity > 0],
+    ...     log_velocity_squared=log_v2[radial_velocity > 0],
+    ...     n_points=20,
+    ...     r_min=0.2,
+    ...     r_max=0.5,
+    ...     save_path="/output/calibration/",
+    ...     sigma_smooth=1.5,
+    ...     lnvsq_lims=(-2.0, 2.5),
+    ...     diagnostics=True,
+    ...     diagnostics_title='Positive vr slope calibration'
+    ... )
+
+    >>> # Calibration for negative radial velocity with custom parameters
+    >>> r_bins_neg, v_minima_neg = _gradient_minima(
+    ...     radius=radius[radial_velocity < 0],
+    ...     log_velocity_squared=log_v2[radial_velocity < 0],
+    ...     n_points=25,
+    ...     r_min=0.2,
+    ...     r_max=0.5,
+    ...     save_path="/output/calibration/",
+    ...     sigma_smooth=2.0,  # More smoothing
+    ...     lnvsq_lims=(-3.0, 3.0),  # Wider velocity range
+    ...     diagnostics=True,
+    ...     diagnostics_title='Negative vr slope calibration'
+    ... )
+
     >>> # Use for splashback radius identification
     >>> # Find where gradient minimum crosses zero velocity
     >>> zero_crossings = np.where(np.diff(np.sign(v_minima)))[0]
@@ -1596,11 +1691,34 @@ def _gradient_minima(
     ...     r_splash = r_bins[zero_crossings[0]]
     ...     print(f"Splashback radius: {r_splash:.2f} R200m")
 
+    >>> # Compare different smoothing scales
+    >>> fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+    >>> for ax, sigma in zip(axes, [1.0, 1.5, 2.5]):
+    ...     r_b, v_m = _gradient_minima(
+    ...         radius=radius,
+    ...         log_velocity_squared=log_v2,
+    ...         n_points=20,
+    ...         r_min=0.2,
+    ...         r_max=0.5,
+    ...         save_path="/output/",
+    ...         sigma_smooth=sigma,
+    ...         diagnostics=False
+    ...     )
+    ...     ax.scatter(radius, log_v2, alpha=0.1, s=1)
+    ...     ax.plot(r_b, v_m, 'r-', linewidth=2)
+    ...     ax.set_title(f'σ = {sigma}')
+    ...     ax.set_xlabel('r/R200m')
+    ...     ax.set_ylabel('ln(v²/v_200m²)')
+    >>> plt.tight_layout()
+    >>> plt.show()
+
     See Also
     --------
     _diagnostic_gradient_minima_plot : Creates visualization of results
     scipy.ndimage.gaussian_filter : Gaussian smoothing implementation
+    scipy.stats.iqr : Interquartile range computation
     numpy.gradient : Gradient computation
+    self_calibration : Uses this function for phase space calibration
     """
     # Validate inputs
     _validate_inputs_positive_number_non_zero(n_points, 'n_points')
@@ -2084,36 +2202,201 @@ def self_calibration(
 ) -> None:
     """Runs calibration from isolated halo samples.
 
+    This function calibrates boundary lines in velocity-radius phase space by
+    analyzing particle distributions around isolated massive halos. It separately
+    calibrates boundaries for particles with positive (outflowing) and negative
+    (inflowing) radial velocities using different optimization strategies:
+    
+    - **Positive radial velocity**: Finds a percentile-based upper boundary line
+      that contains a specified fraction of particles.
+    - **Negative radial velocity**: Finds a boundary line that maximizes
+      perpendicular distances within a specified band width, then applies
+      a low-radius quadratic correction.
+    
+    The calibration parameters are saved to 'calibration_pars.hdf5' for use
+    in halo finding algorithms.
+
     Parameters
     ----------
     n_seeds : int
-        Number of seeds to process
-    seed_data : tuple[numpy.ndarray]
-        Tuple with seed ID, positions, velocities, M200b and R200b.
+        Number of isolated massive seeds to use for calibration. Must be positive.
+        Typical values are 100-500. More seeds improve statistics but increase
+        computation time. Only the most massive isolated halos are selected.
+    seed_data : Tuple[numpy.ndarray]
+        Tuple containing (position, velocity, mass, radius) arrays:
+        - position: shape (n_total_seeds, 3) - seed coordinates in simulation units
+        - velocity: shape (n_total_seeds, 3) - seed velocities in simulation units
+        - mass: shape (n_total_seeds,) - seed masses M200 in simulation units
+        - radius: shape (n_total_seeds,) - seed virial radii R200 in simulation units
     r_max : float
-        Maximum distance to consider
+        Maximum distance from seed centers to consider particles, in 
+        simulation units. Must be positive. Typical values are 3-5 * R200.
     boxsize : float
-        Size of simulation box
+        Size of the cubic simulation box in simulation units. Must be positive.
     minisize : float
-        Size of mini box
+        Size of each cubic minibox in simulation units. Must be positive
+        and smaller than boxsize.
     save_path : str
-        Path to the mini boxes
+        Directory path for reading minibox data and writing calibration results.
+        Must be a valid directory path with read/write permissions.
+        Calibration parameters saved as 'calibration_pars.hdf5'.
     particle_mass : float
-        Mass per particle
-    rhom : float
-        Mass density of the universe
+        Mass of each simulation particle in simulation units (typically M_sun).
+        Must be positive.
+    mass_density : float
+        Mean matter density of the universe at the simulation redshift in 
+        simulation units (typically M_sun/Mpc³). Must be positive.
+    redshift : float
+        Redshift of the simulation snapshot. Must be non-negative.
+        Used to scale the band width for negative radial velocity calibration.
+        Higher redshifts use wider bands to handle increased numerical noise.
     n_points : int, optional
-        Number of minima points to compute, by default 20
-    perc : float, optional
-        Target percentile for the positive radial velocity calibration, 
-        by default 0.98
+        Number of radial bins for gradient minima computation. Must be positive.
+        Default is 20. More points give finer resolution but require more particles.
+    percent : float, optional
+        Target percentile for positive radial velocity boundary as a fraction
+        in range (0, 1). Default is 0.995 (99.5%). This fraction of positive-vr
+        particles will fall below the calibrated boundary line.
     width : float, optional
-        Band width for the negattive radial velocity calibration, 
-        by default 0.05
-    grad_lims : tuple[float]
-        Radial interval where the gradient is computed, by default (0.2, 0.5)
-    n_threads : int
-        Number of threads, by default None
+        Base band width for negative radial velocity calibration in units of
+        ln(v²/v_200m²). Must be positive. Default is 0.05. This is scaled by
+        (1 + z/3) to handle redshift dependence. Smaller values fit tighter
+        to the data but may be noisier.
+    gradient_radial_lims : Tuple[float], optional
+        Radial interval (r_min, r_max) in units of R200m for computing gradient
+        minima. Default is (0.2, 0.5). This range should capture the linear
+        regime of the phase space boundaries.
+    isolation_factor : float, optional
+        Maximum allowed mass ratio for isolation criterion. Neighbors must have
+        mass < isolation_factor * seed_mass. Default is 0.2 (20%).
+    isolation_radius_factor : float, optional
+        Factor multiplying R200 to define isolation radius for neighbor search.
+        Default is 2.0.
+    n_threads : int, optional
+        Number of threads for parallel processing. If None, uses half of
+        available CPU cores. Only used when generating calibration data.
+    diagnostics : bool, optional
+        Whether to generate diagnostic plots of calibration process and results.
+        Default is True. Plots saved to save_path.
+
+    Returns
+    -------
+    None
+        Function saves calibration parameters to HDF5 file but returns nothing.
+
+    Raises
+    ------
+    TypeError
+        If n_seeds is not an integer, or if array inputs in seed_data cannot
+        be converted to numpy arrays.
+    ValueError
+        If n_seeds is non-positive, if array shapes in seed_data are incompatible,
+        if any scalar parameters are non-positive, if percent is not in (0, 1),
+        or if gradient_radial_lims is invalid.
+    FileNotFoundError
+        If save_path doesn't exist or if required minibox files are missing.
+    OSError
+        If HDF5 files cannot be read/written, or if directory permissions
+        are insufficient.
+    RuntimeError
+        If optimization fails to converge or if insufficient data for calibration.
+
+    Notes
+    -----
+    **Algorithm Overview**:
+    
+    1. Load calibration data from isolated massive halos
+    2. Separate particles by radial velocity sign
+    3. For positive radial velocity:
+       - Compute gradient minima to find initial boundary slope
+       - Fit linear model to minima (with outlier rejection)
+       - Optimize intercept to achieve target percentile
+    4. For negative radial velocity:
+       - Compute gradient minima similarly
+       - Optimize intercept to maximize perpendicular distances
+       - Refine slope with fixed intercept
+       - Compute low-radius quadratic correction
+    5. Save all parameters to HDF5 file
+    
+    **Calibration Parameters Saved**:
+    
+    - 'pos': [slope, intercept] for positive vr boundary (linear)
+    - 'neg/line': [slope, intercept] for negative vr boundary (linear at large r)
+    - 'neg/quad': [alpha, beta, gamma] for negative vr correction (quadratic at small r)
+    
+    The negative vr boundary uses a piecewise model:
+    - Linear: y = slope * (r - 0.5) + intercept for r > r_transition
+    - Quadratic: y = alpha * r² + beta * r + gamma for r ≤ r_transition
+    
+    **Outlier Rejection**:
+    
+    Uses median absolute deviation (MAD) with scale factor 1.4826 to identify
+    and reject outliers in gradient minima before fitting. Points beyond 3*MAD
+    from the median are excluded.
+    
+    **Redshift Scaling**:
+    
+    The band width for negative vr calibration is scaled as width * (1 + z/3)
+    to handle increased numerical noise at higher redshifts. Calibrated up to z~3.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> 
+    >>> # Prepare seed catalog from halo finder
+    >>> positions = np.random.uniform(0, 100, (1000, 3))
+    >>> velocities = np.random.normal(0, 200, (1000, 3))
+    >>> masses = np.random.lognormal(30, 1, 1000)
+    >>> radii = (masses / 1e12) ** (1/3) * 0.5
+    >>> seed_data = (positions, velocities, masses, radii)
+    >>> 
+    >>> # Run self-calibration
+    >>> self_calibration(
+    ...     n_seeds=200,
+    ...     seed_data=seed_data,
+    ...     r_max=4.0,
+    ...     boxsize=100.0,
+    ...     minisize=10.0,
+    ...     save_path="/data/calibration/",
+    ...     particle_mass=1e10,
+    ...     mass_density=2.78e11,
+    ...     redshift=0.0,
+    ...     percent=0.995,
+    ...     diagnostics=True
+    ... )
+    >>> 
+    >>> # Load calibrated parameters
+    >>> import h5py
+    >>> with h5py.File("/data/calibration/calibration_pars.hdf5", 'r') as f:
+    ...     slope_pos, b_pos = f['pos'][()]
+    ...     slope_neg, b_neg = f['neg/line'][()]
+    ...     alpha, beta, gamma = f['neg/quad'][()]
+    >>> print(f"Positive vr: slope={slope_pos:.3f}, intercept={b_pos:.3f}")
+    >>> print(f"Negative vr: slope={slope_neg:.3f}, intercept={b_neg:.3f}")
+
+    >>> # Calibration at higher redshift
+    >>> self_calibration(
+    ...     n_seeds=300,
+    ...     seed_data=seed_data_z2,
+    ...     r_max=4.0,
+    ...     boxsize=200.0,
+    ...     minisize=10.0,
+    ...     save_path="/data/calibration_z2/",
+    ...     particle_mass=1e10,
+    ...     mass_density=2.78e11,
+    ...     redshift=2.0,  # Higher redshift
+    ...     width=0.05,     # Will be scaled to 0.05 * (1 + 2/3) ≈ 0.083
+    ...     n_threads=16,
+    ...     diagnostics=True
+    ... )
+
+    See Also
+    --------
+    calibrate : High-level interface with cosmology-based calibration option
+    get_calibration_data : Loads particle data for calibration
+    _gradient_minima : Finds boundaries from gradient analysis
+    _cost_percentile : Cost function for percentile-based fitting
+    _cost_perpendicular_distance_abscissa : Cost function for distance-based fitting
     """
     radius, radial_velocity, log_velocity_squared = get_calibration_data(
         n_seeds=n_seeds,
@@ -2242,6 +2525,7 @@ def self_calibration(
     gamma = 2.
     alpha = (gamma - b_neg) / radius_pivot**2
     beta = slope_negative_vr - 2 * alpha * radius_pivot
+    print(alpha, beta)
 
     # Save to file
     with h5py.File(save_path + 'calibration_pars.hdf5', 'w') as hdf:
@@ -2287,17 +2571,172 @@ def calibrate(
     omega_m: float = None,
     **kwargs,
 ) -> None:
-    """Calibrates finder by assuming cosmology dependence. If `omega_m` is 
-    `None`, then it runs the calibration on the simulation data directly.
+    """Calibrate halo finder parameters using cosmology-based or simulation-based 
+    approach.
+
+    This is a high-level interface function that provides two calibration modes:
+    
+    1. **Cosmology-based calibration** (omega_m provided): Uses pre-calibrated
+       empirical relations between calibration parameters and matter density
+       parameter Ωₘ. This is fast and doesn't require simulation data, but
+       assumes standard ΛCDM cosmology.
+       
+    2. **Self-calibration** (omega_m=None): Performs full self-calibration from
+       simulation data by analyzing particle distributions around isolated halos.
+       This is more accurate for non-standard cosmologies or specific simulations
+       but requires more computation.
+
+    Both modes save calibration parameters to 'calibration_pars.hdf5' in the
+    specified directory for use in halo finding.
 
     Parameters
     ----------
     save_path : str
-        Path to the mini boxes. Saves the calibration parameter in this directory.
+        Directory path where calibration parameters will be saved. Must be a
+        valid directory path with write permissions. For self-calibration mode,
+        this directory must also contain the minibox data files.
+        Calibration parameters saved as 'calibration_pars.hdf5'.
     omega_m : float, optional
-        Matter density parameter Omega matter, by default None.
-    **kwargs
-        See `run_calibrate` for parameter descriptions.
+        Matter density parameter Ωₘ at z=0 for cosmology-based calibration.
+        If provided, uses empirical scaling relations. Must be positive and
+        typically in range [0.2, 0.4]. Standard ΛCDM values:
+        - Planck 2018: Ωₘ ≈ 0.315
+        - WMAP: Ωₘ ≈ 0.27
+        If None (default), performs full self-calibration from simulation data.
+    **kwargs : dict
+        Additional keyword arguments passed to self_calibration when omega_m=None.
+        Ignored when using cosmology-based calibration. Required parameters for
+        self-calibration include:
+        - n_seeds : int - Number of halos for calibration
+        - seed_data : tuple - Halo catalog data
+        - r_max : float - Maximum radius for particle selection
+        - boxsize : float - Simulation box size
+        - minisize : float - Minibox size
+        - particle_mass : float - Particle mass
+        - mass_density : float - Mean matter density
+        - redshift : float - Simulation redshift
+        See self_calibration docstring for complete parameter descriptions.
+
+    Returns
+    -------
+    None
+        Function saves calibration parameters to HDF5 file but returns nothing.
+
+    Raises
+    ------
+    ValueError
+        If omega_m is provided but is non-positive or unreasonably large (>1).
+    OSError
+        If save_path doesn't exist or lacks write permissions, or if
+        required minibox files are missing (self-calibration mode only).
+    TypeError
+        If required kwargs are missing or have wrong types (self-calibration mode).
+    RuntimeError
+        If self-calibration optimization fails to converge.
+
+    Notes
+    -----
+    **Cosmology-based Calibration**:
+    
+    Uses empirical fitting formulas calibrated from a suite of simulations:
+    
+    - Positive radial velocity boundary:
+      * slope = -1.915 (fixed)
+      * intercept = 1.664 + 0.74 * (Ωₘ - 0.3)
+      
+    - Negative radial velocity boundary (at r_pivot = 0.5):
+      * slope = -1.592 + 0.696 * (Ωₘ - 0.3)
+      * intercept = 0.8 + 0.525 * (Ωₘ - 0.3)
+      * Quadratic correction computed to match boundary at r=0.5
+      
+    These relations are valid for ΛCDM cosmologies with Ωₘ ∈ [0.2, 0.4] and
+    are calibrated at z=0. For other redshifts or non-standard cosmologies,
+    self-calibration is recommended.
+    
+    **Self-calibration**:
+    
+    Performs full calibration by analyzing particle phase space around isolated
+    massive halos. See self_calibration docstring for algorithm details.
+    Recommended when:
+    - Using non-standard cosmology
+    - Simulations with modified gravity or dark energy
+    - Requiring maximum accuracy for specific simulation
+    - Calibrating at high redshift (z > 1)
+    
+    **HDF5 File Structure**:
+    
+    The output file 'calibration_pars.hdf5' contains:
+    - 'pos': [slope, intercept] for positive vr boundary
+    - 'neg/line': [slope, intercept] for negative vr boundary (linear part)
+    - 'neg/quad': [alpha, beta, gamma] for negative vr boundary (quadratic correction)
+
+    Examples
+    --------
+    >>> # Example 1: Fast cosmology-based calibration
+    >>> calibrate(
+    ...     save_path="/data/calibration/",
+    ...     omega_m=0.3  # Use Ωₘ = 0.3 (close to Planck 2018)
+    ... )
+    >>> 
+    >>> # Verify saved parameters
+    >>> import h5py
+    >>> with h5py.File("/data/calibration/calibration_pars.hdf5", 'r') as f:
+    ...     slope_pos, b_pos = f['pos'][()]
+    ...     print(f"Positive vr: slope={slope_pos:.3f}, intercept={b_pos:.3f}")
+    Positive vr: slope=-1.915, intercept=1.664
+
+    >>> # Example 2: Self-calibration from simulation data
+    >>> import numpy as np
+    >>> 
+    >>> # Prepare halo catalog
+    >>> positions = np.random.uniform(0, 100, (1000, 3))
+    >>> velocities = np.random.normal(0, 200, (1000, 3))
+    >>> masses = np.random.lognormal(30, 1, 1000)
+    >>> radii = (masses / 1e12) ** (1/3) * 0.5
+    >>> seed_data = (positions, velocities, masses, radii)
+    >>> 
+    >>> calibrate(
+    ...     save_path="/data/calibration/",
+    ...     omega_m=None,  # Trigger self-calibration mode
+    ...     n_seeds=200,
+    ...     seed_data=seed_data,
+    ...     r_max=4.0,
+    ...     boxsize=100.0,
+    ...     minisize=10.0,
+    ...     particle_mass=1e10,
+    ...     mass_density=2.78e11,
+    ...     redshift=0.0,
+    ...     diagnostics=True
+    ... )
+
+    >>> # Example 3: Different cosmologies
+    >>> for omega in [0.25, 0.30, 0.35]:
+    ...     output_dir = f"/data/calibration_Om{omega:.2f}/"
+    ...     calibrate(save_path=output_dir, omega_m=omega)
+    ...     print(f"Calibrated for Ωₘ = {omega}")
+
+    >>> # Example 4: High-redshift self-calibration
+    >>> calibrate(
+    ...     save_path="/data/calibration_z2/",
+    ...     omega_m=None,
+    ...     n_seeds=300,
+    ...     seed_data=seed_data_z2,
+    ...     r_max=4.0,
+    ...     boxsize=200.0,
+    ...     minisize=10.0,
+    ...     particle_mass=1e10,
+    ...     mass_density=2.78e11,
+    ...     redshift=2.0,  # High redshift
+    ...     n_threads=16,
+    ...     diagnostics=True
+    ... )
+
+    See Also
+    --------
+    self_calibration : Full self-calibration from simulation data
+    get_calibration_data : Loads particle data for calibration
+    _cost_percentile : Cost function for boundary fitting
+    _gradient_minima : Identifies phase space boundaries
     """
     if omega_m:
         slope_pos = -1.915
