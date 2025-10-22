@@ -442,7 +442,7 @@ def _find_isolated_seeds(
 
     # Compute KDTree with seed positions. Saw a 40% improvement over previous 
     # method.
-    position_tree = cKDTree(position, boxsize=boxsize)
+    position_tree = cKDTree(numpy.mod(position, boxsize), boxsize=boxsize)
 
     for i in range(n_seeds):
         # If all requested isolated seeds have been found, exit loop
