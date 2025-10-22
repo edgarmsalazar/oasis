@@ -250,7 +250,7 @@ def _validate_inputs_positive_number(value, name):
 def _validate_inputs_positive_number_non_zero(value, name):
     """Validate that a value is a positive number."""
     _validate_inputs_positive_number(value, name)
-    if value == 0:
+    if value == 0 or value == 0.:
         raise ValueError(f"{name} must be non-zero")
 
 

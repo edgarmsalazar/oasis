@@ -333,19 +333,19 @@ class TestValidateInputsBoxsizeMinisize:
         "boxsize, minisize, expected_error, error_message",
         [
             # Negative boxsize
-            (-1.0, 10.0, ValueError, "boxsize must be positive"),
-            (-100, 10.0, ValueError, "boxsize must be positive"),
-            (-0.1, 0.05, ValueError, "boxsize must be positive"),
+            (-1.0, 10.0, ValueError, "boxsize must be zero or positive"),
+            (-100, 10.0, ValueError, "boxsize must be zero or positive"),
+            (-0.1, 0.05, ValueError, "boxsize must be zero or positive"),
             # Zero boxsize
-            (0, 10.0, ValueError, "boxsize must be positive"),
-            (0.0, 5.0, ValueError, "boxsize must be positive"),
+            (0, 10.0, ValueError, "boxsize must be non-zero"),
+            (0.0, 5.0, ValueError, "boxsize must be non-zero"),
             # Negative minisize
-            (100.0, -1.0, ValueError, "minisize must be positive"),
-            (100.0, -10, ValueError, "minisize must be positive"),
-            (50.0, -0.1, ValueError, "minisize must be positive"),
+            (100.0, -1.0, ValueError, "minisize must be zero or positive"),
+            (100.0, -10, ValueError, "minisize must be zero or positive"),
+            (50.0, -0.1, ValueError, "minisize must be zero or positive"),
             # Zero minisize
-            (100.0, 0, ValueError, "minisize must be positive"),
-            (100.0, 0.0, ValueError, "minisize must be positive"),
+            (100.0, 0, ValueError, "minisize must be non-zero"),
+            (100.0, 0.0, ValueError, "minisize must be non-zero"),
             # minisize > boxsize
             (10.0, 20.0, ValueError, "minisize cannot be larger than boxsize"),
             (5, 10, ValueError, "minisize cannot be larger than boxsize"),
@@ -475,7 +475,7 @@ class TestValidateInputsLoad:
             # mini_box_id too large
             (1000, 10.0, 1.0, 1.0, ValueError, "exceeds maximum valid ID"),
             # Negative padding
-            (0, 10.0, 1.0, -0.5, ValueError, "padding must be positive"),
+            (0, 10.0, 1.0, -0.5, ValueError, "padding must be zero or positive"),
         ],
     )
     def test_value_errors(

@@ -139,15 +139,15 @@ class TestGetMiniBoxId:
 
             # Value errors - sizes
             (ValueError, numpy.array([1.0, 1.0, 1.0]), -5.0, 1.0,
-             "boxsize must be positive"),
+             "boxsize must be zero or positive"),
             (ValueError, numpy.array([1.0, 1.0, 1.0]), 10.0, -1.0,
-             "minisize must be positive"),
+             "minisize must be zero or positive"),
             (ValueError, numpy.array([1.0, 1.0, 1.0]), 5.0, 10.0,
              "minisize cannot be larger than boxsize"),
             (ValueError, numpy.array([1.0, 1.0, 1.0]), 0.0, 1.0,
-             "boxsize must be positive"),
+             "boxsize must be non-zero"),
             (ValueError, numpy.array([1.0, 1.0, 1.0]), 10.0, 0.0,
-             "minisize must be positive"),
+             "minisize must be non-zero"),
 
             # Value errors - shapes
             (ValueError, numpy.array([1.0, 1.0]), 10.0, 1.0,
@@ -1000,10 +1000,10 @@ class TestSplitSimulationIntoMiniBoxes:
             )
 
     @pytest.mark.parametrize("boxsize,minisize,expected_error", [
-        (0, 2.0, "boxsize must be positive"),
-        (-5.0, 2.0, "boxsize must be positive"),
-        (10.0, 0, "minisize must be positive"),
-        (10.0, -2.0, "minisize must be positive"),
+        (0, 2.0, "boxsize must be non-zero"),
+        (-5.0, 2.0, "boxsize must be zero or positive"),
+        (10.0, 0, "minisize must be non-zero"),
+        (10.0, -2.0, "minisize must be zero or positive"),
         (5.0, 10.0, "minisize cannot be larger than boxsize"),
         ("10.0", 2.0, "must be numeric"),
         (10.0, "2.0", "must be numeric"),
