@@ -442,7 +442,7 @@ def _find_isolated_seeds(
 
     # Compute KDTree with seed positions. Saw a 40% improvement over previous 
     # method.
-    position_tree = cKDTree(numpy.mod(position, boxsize), boxsize=boxsize)
+    position_tree = cKDTree(position, boxsize=boxsize)
 
     for i in range(n_seeds):
         # If all requested isolated seeds have been found, exit loop
@@ -703,6 +703,9 @@ def _select_candidate_seeds(
 
     # Unpack seed data
     position, velocity, mass, radius = seed_data
+
+    # Trim values outside boxsize due to floating point precision
+    position = numpy.mod(position, boxsize)
 
     # Rank order by mass.
     order = numpy.argsort(-mass)

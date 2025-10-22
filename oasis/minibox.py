@@ -330,6 +330,9 @@ def split_simulation_into_mini_boxes(
     n_cells = cells_per_side**3
     n_items = positions.shape[0]
 
+    # Trim values outside boxsize due to floating point precision
+    positions = numpy.mod(positions, boxsize)
+
     if n_items == 0:
         raise ValueError("No particles provided (empty arrays)")
 
