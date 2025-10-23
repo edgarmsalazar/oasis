@@ -7,7 +7,7 @@ from oasis.common import (_validate_inputs_coordinate_arrays,
 def relative_coordinates(
     positions: numpy.ndarray,
     reference: numpy.ndarray,
-    box_size: float,
+    boxsize: float,
     periodic: bool = True
 ) -> numpy.ndarray:
     """Compute positions relative to a reference point, with optional
@@ -15,8 +15,7 @@ def relative_coordinates(
 
     This function calculates the displacement vectors from a reference point
     to a set of positions, optionally applying the minimum image convention
-    for periodic boundary conditions. This is commonly used in molecular
-    dynamics and cosmological simulations.
+    for periodic boundary conditions.
 
     Parameters
     ----------
@@ -28,9 +27,8 @@ def relative_coordinates(
     reference : numpy.ndarray
         Reference position with shape (3,) representing the (x, y, z)
         coordinates of the reference point.
-    box_size : float
+    boxsize : float
         Size of the cubic simulation box. Must be a positive scalar.
-        All box dimensions are assumed to be equal.
     periodic : bool, default=True
         Whether to apply periodic boundary conditions using the minimum
         image convention. If True, particles are mapped to their nearest
@@ -47,19 +45,26 @@ def relative_coordinates(
     ------
     ValueError
         If `positions` does not have shape (N, 3) or (3,), `reference` does not
-        have shape (3,), or `box_size` is not a positive scalar.
+        have shape (3,), or `boxsize` is not a positive scalar.
     TypeError
         If inputs cannot be converted to appropriate numpy arrays.
+
+    Notes
+    -----
+    The minimum image convention ensures that the displacement vectors
+    have the smallest possible magnitude in a periodic system. For a
+    cubic box of size L, displacements are wrapped to the interval
+    [-L/2, L/2) in each dimension.
 
     Examples
     --------
     Multiple positions:
-    >>> positions = numpy.array([[0.1, 0.2, 0.3], [0.9, 0.8, 0.7]])
+    >>> positions = numpy.array([[0.1, 0.2, 0.3], [1.1, 0.8, 0.7]])
     >>> reference = numpy.array([0.5, 0.5, 0.5])
     >>> rel_pos = relative_coordinates(positions, reference, 1.0)
     >>> print(rel_pos)
     [[-0.4 -0.3 -0.2]
-     [ 0.4  0.3  0.2]]
+     [ 0.6  0.3  0.2]]
 
     Single position (1D input):
     >>> single_pos = numpy.array([0.1, 0.2, 0.3])
@@ -73,13 +78,6 @@ def relative_coordinates(
     >>> print(rel_pos_no_pbc)
     [[-0.4 -0.3 -0.2]
      [ 0.4  0.3  0.2]]
-
-    Notes
-    -----
-    The minimum image convention ensures that the displacement vectors
-    have the smallest possible magnitude in a periodic system. For a
-    cubic box of size L, displacements are wrapped to the interval
-    [-L/2, L/2) in each dimension.
     """
     # Input validation and type conversion
     _validate_inputs_coordinate_arrays(positions, "positions")
@@ -90,15 +88,15 @@ def relative_coordinates(
         positions = positions.reshape(1, 3)
 
     # Box size validation
-    _validate_inputs_positive_number_non_zero(box_size, "box_size")
+    _validate_inputs_positive_number_non_zero(boxsize, "box_size")
 
     # Compute displacement vectors
     displacement = positions - reference
 
     # Apply periodic boundary conditions using minimum image convention
     if periodic:
-        half_box = 0.5 * box_size
-        displacement = (displacement + half_box) % box_size - half_box
+        half_box = 0.5 * boxsize
+        displacement = (displacement + half_box) % boxsize - half_box
 
     return displacement
 
@@ -111,20 +109,19 @@ def velocity_components(
 
     This function decomposes velocity vectors into radial (along the position
     vector) and tangential (perpendicular to position vector) components.
-    This decomposition is commonly used in astrophysics, fluid dynamics,
-    and particle simulations to analyze motion patterns.
 
     Parameters
     ----------
     positions : numpy.ndarray
         Array of Cartesian coordinates with shape (N, 3) or (3,) for a single
         position. If 1D array with shape (3,) is provided, it will be automatically
-        reshaped to (1, 3). Each row represents the (x, y, z) coordinates of a particle.
+        reshaped to (1, 3). Each row represents the (x, y, z) coordinates of a 
+        single particle.
     velocities : numpy.ndarray
         Array of Cartesian velocities with shape (N, 3) or (3,) for a single
         velocity. If 1D array with shape (3,) is provided, it will be automatically
         reshaped to (1, 3). Each row represents the (vx, vy, vz) velocity components
-        of a particle. Must have the same shape as `positions` after reshaping.
+        of a single particle.
 
     Returns
     -------
@@ -135,7 +132,7 @@ def velocity_components(
         - tangential_velocity : numpy.ndarray with shape (N,)
             Magnitude of velocity component perpendicular to the radial direction.
         - velocity_squared : numpy.ndarray with shape (N,)
-            Total velocity magnitude squared (vx² + vy² + vz²).
+            Total velocity magnitude squared (vx^2 + vy^2 + vz^2).
 
     Raises
     ------
@@ -144,6 +141,16 @@ def velocity_components(
         or if arrays have incompatible shapes.
     TypeError
         If inputs cannot be converted to appropriate numpy arrays.
+
+    Notes
+    -----
+    The radial velocity is computed as \vec{v} \cdot \hat{r}, where \hat{r} is 
+    the unit vector pointing from the origin to the particle position. The 
+    tangential velocity magnitude is computed as \sqrt(v^2 - v_r^2), ensuring 
+    numerical stability by clamping negative values to zero.
+
+    For particles exactly at the origin (r = 0), the radial velocity is set
+    to zero and the tangential velocity equals the total velocity magnitude.
 
     Examples
     --------
@@ -173,16 +180,6 @@ def velocity_components(
     >>> print(f"Tangential velocities: {vt}")
     Radial velocities: [ 0.5 -1.0]
     Tangential velocities: [0.0 0.0]
-
-    Notes
-    -----
-    The radial velocity is computed as v⃗ · r̂, where r̂ is the unit vector
-    pointing from the origin to the particle position. The tangential velocity
-    magnitude is computed as √(|v⃗|² - vᵣ²), ensuring numerical stability
-    by clamping negative values to zero.
-
-    For particles exactly at the origin (r = 0), the radial velocity is set
-    to zero and the tangential velocity equals the total velocity magnitude.
     """
     # Input validation and type conversion
     _validate_inputs_coordinate_arrays(positions, "positions")
@@ -218,19 +215,19 @@ def velocity_components(
     
     # Handle particles not at the center (r > 0)
     nonzero_mask = ~zero_mask
-    # if numpy.any(nonzero_mask):
+    
     # Compute unit radial vectors for non-zero positions
     radial_unit_vectors = positions[nonzero_mask] / \
         radial_distances[nonzero_mask, numpy.newaxis]
 
-    # Compute radial velocity as v⃗ · r̂
+    # Compute radial velocity as \vec{v} \cdot \hat{r}
     radial_velocity[nonzero_mask] = numpy.sum(
         velocities[nonzero_mask] * radial_unit_vectors, axis=1
     )
 
-    # Compute tangential velocity magnitude as √(v² - vᵣ²)
-    # Clamp to avoid numerical issues with floating point precision
+    # Compute tangential velocity magnitude as \sqrt(v^2 - v_r^2)
     radial_velocity_squared = radial_velocity[nonzero_mask]**2
+    # Clamp to avoid numerical issues with floating point precision
     tangential_velocity_squared = numpy.maximum(
         0, velocity_squared[nonzero_mask] - radial_velocity_squared
     )

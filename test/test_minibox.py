@@ -671,15 +671,15 @@ class TestSplitSimulationIntoMiniBoxes:
             if n_particles_in_box == 0:
                 return  # No particles to verify further
 
-            # Verify all particles belong to this mini box
+            # Verify all particles belong to this mini-box
             computed_ids = minibox.get_mini_box_id(
                 saved_positions, boxsize, minisize)
             if isinstance(computed_ids, numpy.ndarray):
                 assert numpy.all(computed_ids == mini_box_id), \
-                    f"Not all particles belong to mini box {mini_box_id}"
+                    f"Not all particles belong to mini-box {mini_box_id}"
             else:
                 assert computed_ids == mini_box_id, \
-                    f"Particle doesn't belong to mini box {mini_box_id}"
+                    f"Particle doesn't belong to mini-box {mini_box_id}"
 
             # Verify data integrity by checking if saved UIDs exist in original data
             original_uid_set = set(original_uid)
@@ -881,7 +881,7 @@ class TestSplitSimulationIntoMiniBoxes:
             "Saved UIDs don't match original UIDs"
 
     # def test_empty_mini_boxes_handling(self, temp_dir):
-    #     """Test behavior with sparse data leading to empty mini boxes."""
+    #     """Test behavior with sparse data leading to empty mini-boxes."""
     #     # Create data clustered in one corner
     #     n_particles = 50
     #     positions = numpy.random.rand(n_particles, 3) * 2.0  # Only in corner
@@ -900,7 +900,7 @@ class TestSplitSimulationIntoMiniBoxes:
     #         minisize=minisize
     #     )
 
-    #     # Verify only some files are created (not all mini boxes have particles)
+    #     # Verify only some files are created (not all mini-boxes have particles)
     #     cells_per_side = int(numpy.ceil(boxsize / minisize))
     #     output_dir = Path(temp_dir) / f"mini_boxes_nside_{cells_per_side}"
 
@@ -909,7 +909,7 @@ class TestSplitSimulationIntoMiniBoxes:
 
     #     # Should have fewer files than total possible boxes
     #     assert len(hdf5_files) < total_possible_boxes, \
-    #         "Expected some empty mini boxes, but all were created"
+    #         "Expected some empty mini-boxes, but all were created"
     #     assert len(hdf5_files) > 0, "No files created"
 
     def test_large_simulation(self, temp_dir, large_simulation_data):
