@@ -2642,9 +2642,9 @@ def calibrate(
         this directory must also contain the mini-box data files.
         Calibration parameters saved as 'calibration_pars.hdf5'.
     omega_m : float, optional
-        Matter density parameter \Omega_m at z=0 for cosmology-based calibration.
-        If provided, uses empirical scaling relations. Must be positive and
-        typically in range [0.2, 0.4]. Standard Lambda-CDM values:
+        Matter density parameter at redshift z, \Omega_m(z) for cosmology-based 
+        calibration. If provided, uses empirical scaling relations. Must be 
+        positive. Standard Lambda-CDM values:
         - Planck 2018: \Omega_m ≈ 0.315
         - WMAP: \Omega_m ≈ 0.27
         If None (default), performs full self-calibration from simulation data.
@@ -2689,17 +2689,17 @@ def calibrate(
     Uses empirical fitting formulas calibrated from a suite of simulations:
     
     - Positive radial velocity boundary:
-      * slope = -1.915 (fixed)
-      * intercept = 1.664 + 0.74 * (\Omega_m - 0.3)
+      * slope = -2.1203 + 0.7614 * (\Omega_m(z) - 0.3)
+      * abscissa = 1.8087 (fixed)
       
     - Negative radial velocity boundary (at r_pivot = 0.5):
-      * slope = -1.592 + 0.696 * (\Omega_m - 0.3)
-      * intercept = 0.8 + 0.525 * (\Omega_m - 0.3)
+      * slope = -1.5812 + 0.8603 * (\Omega_m(z) - 0.3)
+      * abscissa = 0.6204 (fixed)
       * Quadratic correction computed to match boundary at r=0.5
       
-    These relations are valid for Lambda-CDM cosmologies with \Omega_m ∈ [0.2, 0.4] 
-    and are calibrated at z=0. For other redshifts or non-standard cosmologies,
-    self-calibration is recommended.
+    These relations are valid for Lambda-CDM cosmologies and were calibrated at 
+    z ∈ [0, 3] on the latin-hypercube sample of the Quijote suite of simulations.
+    For other redshifts or non-standard cosmologies, self-calibration is recommended.
     
     **Self-calibration**:
     
@@ -2782,15 +2782,19 @@ def calibrate(
     if omega_m:
         if omega_m <=0 or omega_m > 1:
             raise ValueError("Omega_m out of bounds.")
+        
+        # Positive radial velocity
+        slope_pos = -2.1203 + 0.7614 * (omega_m - 0.3)
+        b_pivot_pos = 1.8087
 
-        slope_pos = -1.915
-        b_pivot_pos = 1.664 + 0.74 * (omega_m - 0.3)
-
+        # Negative radial velocity
+        slope_neg = -1.5812 + 0.8603 * (omega_m - 0.3)
+        b_pivot_neg = 0.6204
+        
+        # Low radius correction
         x0 = 0.5
-        slope_neg = -1.592 + 0.696 * (omega_m - 0.3)
-        b_pivot_neg = 0.8 + 0.525 * (omega_m - 0.3)
-        b_neg = b_pivot_neg - slope_neg * x0
         gamma = 2.
+        b_neg = b_pivot_neg - slope_neg * x0
         alpha = (gamma - b_neg) / x0**2
         beta = slope_neg - 2 * alpha * x0
 
