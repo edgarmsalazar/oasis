@@ -41,8 +41,8 @@ The choice of units is not strict to the ones shown below. However, it must be c
 - `boxsize`: side length of the simulation box in units of $h^{-1}{\rm Mpc}$.
 - `minisize`: side length of the minibox or subvolume in units of $h^{-1}{\rm Mpc}$.
 - `padding`: length of the padding distance form the edge of the minibox in units of $h^{-1}{\rm Mpc}$.
-- `rhom`: mass density of the Universe in units of $h^{-2} M_{\odot} / {\rm Mpc}^{3}$.
-- `part_mass`: dark matter particle mass in units of $h^{-2} M_{\odot}$.
+- `mass_density`: mass density of the Universe in units of $h^{-2} M_{\odot} / {\rm Mpc}^{3}$.
+- `particle_mass`: dark matter particle mass in units of $h^{-2} M_{\odot}$.
 - `save_path`: path to the directory where <span style="font-variant:small-caps;">Oasis</span> will save all data products.
 
 ### Step 1: Prepare data
@@ -54,14 +54,9 @@ any simulation and keeping the API simple and lightweight. The input data must i
 
 where $R_{s}$ is the NFW scale radius, and $M_{\rm 200b}$ is [<span style="font-variant:small-caps;">Rockstar</span>](https://ui.adsabs.harvard.edu/abs/2013ApJ...762..109B/abstract) mass definition.
 
-<span style="font-variant:small-caps;">Oasis</span> splits the simulation volume into $\left\lceil L_{\rm boxsize}/L_{\rm minisize}\right\rceil^3$ miniboxes or subvolumes in order to process the full catalogue in parallel. For this reason it effectively duplicates the data in disc, meaning that the necessary free storage must be at least the same size of the input catalogues. Although this might not be an issue for most HPCs, please keep this in mind when running in personal computers. The current implementation also loads the full catalogue into RAM so it could be a problem on smaller systems.
+> Velocities are assumed to be physical velocities scaled by the scale factor $a$, like $v_{\rm phys}/\sqrt{a}$. The kinetic energy $T\sim a^{-2}$ so that $\ln\left(a^2v^2/v_{\rm 200m}\right) - r/R_{\rm 200m}$ space is within a fixed range. Plase make sure the input velocities are in this convention.
 
-There are two user parameters that the `split_box_into_mini_boxes` method takes which relate to how many seeds or particles are processed at a time when saving into miniboxes. The actual values will depend on your own data, but a good estimate is $\gtrsim N_{\rm items}/N_{\rm miniboxes}$. The values below for chunksize are acceptable for a catalogue with $\sim 4\times10^{6}$ seeds and $1024^3$ particles.
-
-- `chunksize_seed` = 100_000
-- `chunksize_part` = 10_000_000
-
-If the chunksize is too small (tends to happen more with particles), then the minibox splitting function will raise an error as it will not resolve which items fit in the chunk. If that happens simply increase the chunksize by 20-50% of the estimate above.
+<span style="font-variant:small-caps;">Oasis</span> splits the simulation volume into $\left\lceil L_{\rm boxsize}/L_{\rm minisize}\right\rceil^3$ miniboxes or subvolumes in order to process the full catalogue in parallel. For this reason it effectively duplicates the data in disc, meaning that the necessary free storage must be at least the same size of the input catalogues. Although this might not be an issue for most HPCs, please keep this in mind when running on personal computers. The current implementation also loads the full catalogue into RAM so it could be a problem on smaller systems.
 
 Here is an example:
 ```python
@@ -84,16 +79,15 @@ split_box_into_mini_boxes(
     save_path=save_path,
     boxsize=boxsize,
     minisize=minisize,
-    chunksize=chunksize_seed,
     name='seed',
     props=props_zip,
 )
 ```
 
-The same function is used for particles with the only exception that `props=None` and `name='part'`.
+The same function is used for particles with the exception that `props=None` and `name='part'`.
 
 ### Step 2: Calibration
-Before running <span style="font-variant:small-caps;">Oasis</span> on the full volume, it needs to be calibrated. That is, it needs to find the cut line in $\ln\ v^2-r$ space that classifies particles into orbiting and infalling. This is only done once per the simulation box so subsequent runs of <span style="font-variant:small-caps;">Oasis</span> use the same calibration.
+Before running <span style="font-variant:small-caps;">Oasis</span> on the full volume, it needs to be calibrated. That is, it needs to find the cut line in $\ln\ a^2v^2-r$ space that classifies particles into orbiting and infalling. This is only done once per simulation box so subsequent runs of <span style="font-variant:small-caps;">Oasis</span> with the same simualtion box use the same calibration.
 
 There are two options for calibrating the algorithm.
 
@@ -118,33 +112,35 @@ The other three calibration parameters are cosmology independent and are fixed t
  Below are the parameters for the `calibrate` method and an example.
     - `n_seeds`: number of seeds to load (depends on mass resolution).
     - `r_max`: search radius in units of $h^{-1}{\rm Mpc}$. All particles within this radius will be collected for calibration.
-    - `calib_p`: calibration parameter for $v_r>0$. Sets the target fraction of particles below the cut line. Defaults to $0.995$.
-    - `calib_w`: calibration parameter for $v_r<0$. Sets the width of the band around the cut line. Defaults to $0.050$.
-    - `calib_n_points`: number of gradient points to use when finding the slope of the cut line. Defaults to $20$.
-    - `calib_grad_lims`: radial interval where the gradient points are taken from. Defaults to $(0.2, 0.5)$ in units of $r/R_{\rm 200b}$.
+    - `redshift`: cosmological redshift of the simulation box (snapshot).
+    - `percent`: calibration parameter for $v_r>0$. Sets the target fraction of particles below the cut line. Defaults to $0.995$.
+    - `width`: calibration parameter for $v_r<0$. Sets the width of the band around the cut line. Defaults to $0.050$.
+    - `n_points`: number of gradient points to use when finding the slope of the cut line. Defaults to $20$.
+    - `gradient_radial_bins`: radial interval where the gradient points are taken from. Defaults to $(0.2, 0.5)$ in units of $r/R_{\rm 200b}$.
     - `n_threads`: number of multiprocessing threads to use. Speeds up loading seeds from each distinct minibox. Defaults to `None`.
 
-    > Input data order matters: ID, $\vec{x}$, $\vec{v}$, $M_{\rm 200b}$, $R_{\rm 200b}$.
+    > Input data order matters: $\vec{x}$, $\vec{v}$, $M_{\rm 200b}$, $R_{\rm 200b}$.
 
     In this case, the function call requires inputs as keyword arguments.
     ```python
     from oasis.calibration import calibrate
 
-    data = (hid, pos, vel, m200b, r200b)
+    data = (pos, vel, m200b, r200b)
 
     calibrate(
-        save_path=save_path,
         n_seeds=n_seeds,
         seed_data=data,
         r_max=r_max,
         boxsize=boxsize,
         minisize=minisize,
-        part_mass=part_mass,
-        rhom=rhom,
+        save_path=save_path,
+        particle_mass=particle_mass,
+        mass_density=mass_density,
+        redshift=redshift,
         n_points=calib_n_points,
-        perc=calib_p,
-        width=calib_w,
-        grad_lims=calib_grad_lims,
+        percent=calib_vrp_percent,
+        width=calib_vrn_width,
+        gradient_radial_lims=calib_gradient_radial_limits,
         n_threads=n_threads,
     )
     ```

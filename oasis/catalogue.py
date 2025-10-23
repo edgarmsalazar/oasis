@@ -9,7 +9,7 @@ import pandas as pd
 from scipy.optimize import fsolve
 from tqdm import tqdm
 
-from oasis.common import G_gravity, mkdir
+from oasis.common import G_GRAVITY, ensure_dir_exists
 from oasis.coordinates import relative_coordinates
 from oasis.minibox import load_particles, load_seeds
 
@@ -133,7 +133,7 @@ def classify(
     """
     m_pos, b_pos, m_neg, b_neg, alpha, beta, gamma = class_pars
     # Compute V200
-    v200 = G_gravity * m200 / r200
+    v200 = G_GRAVITY * m200 / r200
 
     # Compute the radius to seed_i in r200 units, and ln(v^2) in v200 units
     part_ln_vel = np.log(np.sum(np.square(rel_vel), axis=1) / v200)
@@ -200,7 +200,7 @@ def classify_single_mini_box(
     None
     """
     save_path = load_path + f'run_{run_name}/mini_box_catalogues/'
-    mkdir(save_path)
+    ensure_dir_exists(save_path)
 
     # Load seeds in mini box
     pos_seed, vel_seed, hid, r200b, m200b, rs, mask_mb = \
@@ -330,7 +330,7 @@ def classify_single_mini_box(
                     r_ball = np.min([r_ball, r200b[i+1:][mask_seed][j]])
 
                     # Defines the search velocity  of the 6D ball.
-                    v_ball_sq = 2**2 * G_gravity * m200b[i+1:][mask_seed][j] / \
+                    v_ball_sq = 2**2 * G_GRAVITY * m200b[i+1:][mask_seed][j] / \
                         r200b[i+1:][mask_seed][j]
 
                     # Check the fraction of orbiting particles in the 6D ball
@@ -519,7 +519,7 @@ def run_orbiting_mass_assignment(
     """
     # Create directory if it does not exist
     save_path = load_path + f'run_{run_name}/mini_box_catalogues/'
-    mkdir(save_path)
+    ensure_dir_exists(save_path)
 
     # Number of miniboxes
     n_mini_boxes = np.int_(np.ceil(boxsize / minisize))**3
