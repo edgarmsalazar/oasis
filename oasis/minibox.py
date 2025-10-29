@@ -17,7 +17,7 @@ from oasis.coordinates import relative_coordinates
 __all__ = [
     'get_mini_box_id',
     'get_adjacent_mini_box_ids',
-    'split_simulation_into_mini_boxes',
+    'process_simulation_data',
     'load_particles',
     'load_seeds',
 ]
