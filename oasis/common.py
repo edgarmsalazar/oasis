@@ -138,20 +138,29 @@ class TimerContext:
 
     def __enter__(self):
         self.start_time = perf_counter()
+        if self.fancy:
+            print(
+                f"{AnsiColor.BULLET} {AnsiColor.BOLD}{AnsiColor.OKGREEN}"
+                f"{self.name}... {AnsiColor.ENDC}"
+            )
+        else:
+            print(f"{self.name} completed in...")
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.elapsed = perf_counter() - self.start_time
-        elapsed_str = f"{self.elapsed:.{self.precision}f}s"
+        
+        hours = int(self.elapsed // 3600)
+        remaining_seconds = self.elapsed % 3600
+        minutes = int(remaining_seconds // 60)
+        seconds = remaining_seconds % 60
+        miliseconds = int(10**self.precision * (seconds - int(seconds)))
+        elapsed_str = f"{hours:02d}:{minutes:02d}:{int(seconds):02d}.{miliseconds:03d}"
 
         if self.fancy:
-            print(
-                f"{AnsiColor.BULLET}{AnsiColor.BOLD}{AnsiColor.OKGREEN}"
-                f"{self.name} completed in {AnsiColor.ENDC}"
-                f"{AnsiColor.WARNING}{elapsed_str}{AnsiColor.ENDC}"
-            )
+            print(f"\t {AnsiColor.OKGREEN}completed in {AnsiColor.WARNING}{elapsed_str}{AnsiColor.ENDC}")
         else:
-            print(f"{self.name} completed in {elapsed_str}")
+            print(f"\t completed in {elapsed_str}")
 
 
 def get_min_unit_dtype(num: int) -> numpy.dtype:
@@ -326,41 +335,24 @@ def _validate_inputs_mini_box_id(mini_box_id, cells_per_side):
         )
 
 
-def _validate_inputs_box_partitioning(positions, velocities, uid, props):
-    """Validate function inputs and raise appropriate errors."""
-    # Check array shapes
-    _validate_inputs_coordinate_arrays(positions, "positions")
-    _validate_inputs_coordinate_arrays(velocities, "velocities")
+def _validate_inputs_process_objects(data, n_items):
+    # Check number of items in data must be three
+    if not isinstance(data, tuple) or len(data) != 3:
+        raise ValueError("data must be a tuple of (arrays, labels, dtypes)")
+    
+    # Check all items in data are tuples or lists
+    arrays, labels, dtypes = data
+    if not (isinstance(arrays, (list, tuple)) and
+            isinstance(labels, (list, tuple)) and
+            isinstance(dtypes, (list, tuple))):
+        raise ValueError("data must contain only lists or tuples")
 
-    if uid.ndim != 1:
-        raise ValueError("uid must be a 1D array")
-
-    n_particles = positions.shape[0]
-    if velocities.shape[0] != n_particles or uid.shape[0] != n_particles:
-        raise ValueError(
-            "positions, velocities, and uid must have the same length")
-
-    # Validate props structure if provided
-    if props is not None:
-        if not isinstance(props, tuple) or len(props) != 3:
-            raise ValueError(
-                "props must be a tuple of (arrays, labels, dtypes)")
-
-        arrays, labels, dtypes = props
-        if not (isinstance(arrays, (list, tuple)) and
-                isinstance(labels, (list, tuple)) and
-                isinstance(dtypes, (list, tuple))):
-            raise ValueError("props must contain three lists")
-
-        if not (len(arrays) == len(labels) == len(dtypes)):
-            raise ValueError("All lists in props must have the same length")
-
-        for i, arr in enumerate(arrays):
-            if not isinstance(arr, numpy.ndarray):
-                raise ValueError(f"props array {i} must be a numpy array")
-            if arr.shape[0] != n_particles:
-                raise ValueError(
-                    f"props array {i} must have {n_particles} elements")
+    # Check all items in data are arrays and have the same number of rows
+    for i, arr in enumerate(arrays):
+        if not isinstance(arr, numpy.ndarray):
+            raise ValueError(f"array {i} in data[0] must be a numpy array")
+        if arr.shape[0] != n_items:
+            raise ValueError(f"array {i} in data[0] must have {n_items} elements")
 
 
 def _validate_inputs_load(
