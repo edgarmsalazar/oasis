@@ -83,10 +83,10 @@ def process_seeds() -> None:
     pos, vel, r200b, m200b, hid, rs = seed_data()
 
     # Additional properties to include in seed catalogue.
-    props = [r200b, rs]
+    arrays = [r200b, rs]
     labels = ('R200b', 'Rs')
     dtypes = (np.float32, np.float32)
-    props_zip = (props, labels, dtypes)
+    props = (arrays, labels, dtypes)
 
     # Save seeds into miniboxes according to their minibox ID.
     process_simulation_data(
