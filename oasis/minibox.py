@@ -1,3 +1,5 @@
+import os
+from multiprocessing.dummy import Pool as ThreadPool
 from pathlib import Path
 from typing import List, Optional, Tuple, Union
 
@@ -5,11 +7,11 @@ import h5py
 import numpy
 from tqdm import tqdm
 
-from oasis.common import (TimerContext, _validate_inputs_box_partitioning,
-                          _validate_inputs_boxsize_minisize,
+from oasis.common import (TimerContext, _validate_inputs_boxsize_minisize,
                           _validate_inputs_coordinate_arrays,
                           _validate_inputs_load, _validate_inputs_mini_box_id,
-                          ensure_dir_exists, get_min_unit_dtype)
+                          _validate_inputs_process_objects, ensure_dir_exists,
+                          get_min_unit_dtype)
 from oasis.coordinates import relative_coordinates
 
 __all__ = [
@@ -245,12 +247,14 @@ def split_simulation_into_mini_boxes(
     positions: numpy.ndarray,
     velocities: numpy.ndarray,
     uid: numpy.ndarray,
-    save_path: str,
+    save_dir: str,
     boxsize: float,
     minisize: float,
-    name: Optional[str] = None,
-    props: Optional[Tuple[
-        List[numpy.ndarray], List[str], List[numpy.dtype]]] = None
+    particle_type: str,
+    mass: numpy.ndarray,
+    mass_label: str,
+    props: Optional[Tuple[List[numpy.ndarray], List[str], List[numpy.dtype]]] = None,
+    n_threads: Optional[int] = None,
 ) -> None:
     """
     Split simulation data into mini-boxes and save to HDF5 files.
@@ -322,101 +326,177 @@ def split_simulation_into_mini_boxes(
     ...     boxsize=100.0, minisize=10.0
     ... )
     """
-    # Input validation
-    _validate_inputs_boxsize_minisize(boxsize, minisize)
-    _validate_inputs_box_partitioning(positions, velocities, uid, props)
+    n_items = positions.shape[0]
+    if n_items == 0:
+        raise ValueError("No objects provided (empty arrays)")
 
     # Determine number of partitions per side
-    cells_per_side = int(numpy.ceil(boxsize / minisize))
-    n_cells = cells_per_side**3
-    n_items = positions.shape[0]
+    n_cells = int(numpy.ceil(boxsize / minisize))**3
 
     # Trim values outside boxsize due to floating point precision
     positions = numpy.mod(positions, boxsize)
 
-    if n_items == 0:
-        raise ValueError("No particles provided (empty arrays)")
-
-    # Compute mini-box IDs for all items in chunks with size of the average number
-    # of items per mini-box to imporve computation speed and reduce memory usage.
-    # This is important for large simulations with billions of particles.
-    chunksize = max(1, n_items // n_cells)  # Ensure chunksize >= 1
+    # Compute mini-box IDs for all objects in chunks with size of the average 
+    # number of items per mini-box to improve computation speed and reduce 
+    # memory usage. This is important for large simulations with billions of 
+    # particles.
+    chunksize = int(max(1, numpy.ceil(n_items / n_cells)))  # Ensure chunksize >= 1
     uint_dtype = get_min_unit_dtype(n_cells)
     mini_box_ids = numpy.zeros(n_items, dtype=uint_dtype)
 
-    n_chunks = (n_items + chunksize - 1) // chunksize  # Ceiling division
-    for chunk in tqdm(range(n_chunks), desc='Computing IDs', ncols=100, colour='blue'):
-        low = chunk * chunksize
+    def get_chunk_mini_box_ids(i):
+        low = i * chunksize
         # Ensure we don't exceed array bounds
-        upp = min((chunk + 1) * chunksize, n_items)
+        upp = min((i + 1) * chunksize, n_items)
+        mini_box_ids[low:upp] = get_mini_box_id(positions[low:upp], boxsize, minisize)
 
-        mini_box_ids[low:upp] = get_mini_box_id(
-            positions[low:upp], boxsize, minisize
-        )
+    n_chunks = (n_items + chunksize - 1) // chunksize  # Ceiling division
+    
+    # Cap the number of threads to the total number of mini-boxes to process
+    if n_threads is None:
+        n_threads = min(max(1, os.cpu_count()//2), n_chunks)
+    else:
+        n_threads = min(n_threads, n_chunks)
 
-    # Sort data by mini-box id
-    with TimerContext("Sorting by mini-box ID..."):
-        mb_order = numpy.argsort(mini_box_ids)
-        mini_box_ids = mini_box_ids[mb_order]
-        velocities = velocities[mb_order]
-        positions = positions[mb_order]
-        uid = uid[mb_order]
+    if n_threads > 1:
+        try:
+            with ThreadPool(n_threads) as pool:
+                list(tqdm(pool.imap(get_chunk_mini_box_ids, range(n_chunks)),
+                          total=n_chunks, desc='Computing IDs', ncols=100, 
+                          colour='blue'))
+        except Exception as e:
+            print(f"Warning: Parallel processing failed ({e}), "
+                  "falling back to sequential")
+            # Fall back to sequential processing
+            n_threads = 1
+    if n_threads == 1:
+        for chunk in tqdm(range(n_chunks), desc='Computing IDs', ncols=100, 
+                          colour='blue'):
+            low = chunk * chunksize
+            # Ensure we don't exceed array bounds
+            upp = min((chunk + 1) * chunksize, n_items)
+            mini_box_ids[low:upp] = get_mini_box_id(positions[low:upp], boxsize, minisize)
+    
+    # Group by mini-box ID (linear time)
+    with TimerContext("Sorting by mini-box ID"):
+        unique_ids, inverse = numpy.unique(mini_box_ids, return_inverse=True)
 
-        if props:
-            labels = props[1]
-            dtypes = props[2]
-            props = props[0]
-            for k, item in enumerate(props):
-                props[k] = item[mb_order]
-
-    # Get chunk indices finding the left-most occurence of all unique values in
-    # a sorted array. This ensures that all items with the same mini-box id are
-    # in the same chunk and processed at the same time.
-    unique_values = numpy.arange(n_cells, dtype=uint_dtype)
-    chunk_idx = numpy.searchsorted(mini_box_ids, unique_values, side="left")
+    if props:
+        data_arrays, data_labels, data_dtypes = props
 
     # Get smallest data type to represent IDs
     uint_dtype_pid = get_min_unit_dtype(numpy.max(uid))
-    if props:
-        labels = ('ID', 'pos', 'vel', *labels)
-        dtypes = (uint_dtype_pid, numpy.float32, numpy.float32, *dtypes)
-    else:
-        labels = ('ID', 'pos', 'vel')
-        dtypes = (uint_dtype_pid, numpy.float32, numpy.float32)
 
+    # For each mini-box, save all items in that box to a separate HDF5 file.
+    def write_mini_box(box_id):
+        box_id = unique_ids[box_id]
+        mask = (inverse == box_id)
+        if not numpy.any(mask):
+            return
+
+        pos = positions[mask]
+        vel = velocities[mask]
+        ids = uid[mask]
+        
+        # Use 'a' mode to append data if file already exists.
+        with h5py.File(save_dir + f'{box_id}.hdf5', 'a') as hdf:
+            hdf.create_dataset(name=f'{particle_type}/ID', data=ids, dtype=uint_dtype_pid)
+            hdf.create_dataset(name=f'{particle_type}/pos', data=pos, dtype=numpy.float32)
+            hdf.create_dataset(name=f'{particle_type}/vel', data=vel, dtype=numpy.float32)
+            
+            if isinstance(mass, float):
+                hdf.create_dataset(name=f'{particle_type}/{mass_label}', 
+                                   data=mass, dtype=numpy.float32)
+            else:
+                hdf.create_dataset(name=f'{particle_type}/{mass_label}', 
+                                   data=mass[mask], dtype=numpy.float32)
+
+            if props:
+                for arr_i, label_i, dtype_i in zip(data_arrays, data_labels, data_dtypes):
+                    hdf.create_dataset(name=f'{particle_type}/{label_i}', 
+                                    data=arr_i[mask], dtype=dtype_i)
+
+    if n_threads > 1:
+        try:
+            with ThreadPool(n_threads) as pool:
+                list(tqdm(pool.imap_unordered(write_mini_box, range(n_chunks)),
+                  total=n_chunks, desc='Saving mini-boxes', ncols=100, colour='green'))
+        except Exception as e:
+            print(
+                f"Warning: Parallel processing failed ({e}), falling back to sequential")
+            # Fall back to sequential processing
+            n_threads = 1
+
+    if n_threads == 1:
+        for i in tqdm(range(n_chunks), desc='Saving mini-boxes', ncols=100, 
+                      colour='blue'):
+            write_mini_box(i)
+
+    return None
+
+
+def process_simulation_data(
+    save_path: str,
+    particle_type: str,
+    boxsize: float,
+    minisize: float,
+    positions: numpy.ndarray,
+    velocities: numpy.ndarray,
+    ids: numpy.ndarray,
+    mass: Tuple[Union[float, numpy.ndarray], str],
+    data: Optional[Tuple[Tuple[numpy.ndarray], Tuple[str], Tuple[numpy.dtype]]] = None,
+    n_threads: Optional[int] = None,
+) -> None:
+    # Validate inputs
+    _validate_inputs_boxsize_minisize(boxsize, minisize)
+    _validate_inputs_coordinate_arrays(positions, "positions")
+    _validate_inputs_coordinate_arrays(velocities, "velocities")
+
+    if ids.ndim != 1:
+        raise ValueError("ids must be a 1D array")
+
+    if not isinstance(mass, tuple):
+        raise ValueError("Input 'mass' must be either tuple(float, str) or tuple(array, str)")
+    mass, mass_label = mass
+
+    if isinstance(mass, float):
+        shapes = (velocities.shape[0], ids.shape[0])
+    else:
+        shapes = (velocities.shape[0], ids.shape[0], mass.shape[0])
+
+    n_particles = positions.shape[0]
+    if any(shape != n_particles for shape in shapes):
+        raise ValueError("All positions, velocities, ids and masses must have "
+                         "the same number of elements")
+
+    # If particle type is 'dm' then data must be a float.
+    if particle_type in ('dm', 'part') and not isinstance(mass, (float, int)):
+        raise ValueError("Expected 'data' to be scalar for selected "
+                         f"particle_type but found type {type(mass)}")
+    
+    # Validate seed data shape and type
+    if data:
+        _validate_inputs_process_objects(data, positions.shape[0])
+    
+    # Determine number of partitions per side
+    cells_per_side = int(numpy.ceil(boxsize / minisize))
     # Create target directory
     save_dir = save_path + f'mini_boxes_nside_{cells_per_side}/'
     ensure_dir_exists(save_dir)
 
-    # For each mini-box, save all items in that box to a separate HDF5 file.
-    # Use 'a' mode to append data if file already exists.
-    for i, mini_box_id in enumerate(tqdm(unique_values,
-                                         desc='Saving mini-boxes',
-                                         ncols=100, colour='blue')):
-        # Select chunk
-        low = chunk_idx[i]
-        if i < n_cells - 1:
-            upp = chunk_idx[i + 1]
-        else:
-            upp = None
-
-        pos_chunk = positions[low: upp]
-        vel_chunk = velocities[low: upp]
-        pid_chunk = uid[low: upp]
-
-        with h5py.File(save_dir + f'{mini_box_id}.hdf5', 'a') as hdf:
-            if props:
-                props_chunks = [item[low: upp] for item in props]
-                data = (pid_chunk, pos_chunk, vel_chunk, *props_chunks)
-            else:
-                data = (pid_chunk, pos_chunk, vel_chunk)
-
-            prefix = f'{name}/' if name is not None and name not in hdf.keys() else ''
-
-            for label_i, data_i, dtype_i in zip(labels, data, dtypes):
-                dataset_name = prefix + f'{label_i}'
-                hdf.create_dataset(name=dataset_name,
-                                   data=data_i, dtype=dtype_i)
+    split_simulation_into_mini_boxes(
+        positions=positions,
+        velocities=velocities,
+        uid=ids,
+        save_dir=save_dir,
+        boxsize=boxsize,
+        minisize=minisize,
+        particle_type=particle_type,
+        mass=mass,
+        mass_label=mass_label,
+        props=data,
+        n_threads=n_threads,
+    )
 
     return None
 
