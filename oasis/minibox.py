@@ -506,6 +506,7 @@ def load_particles(
     boxsize: float,
     minisize: float,
     load_path: Union[str, Path],
+    particle_type: str,
     padding: float = 5.0,
 ) -> Tuple[numpy.ndarray, numpy.ndarray, numpy.ndarray]:
     """
@@ -601,20 +602,31 @@ def load_particles(
     cells_per_side = int(numpy.ceil(boxsize / minisize))
 
     # Create empty lists (containers) to save the data from file for each ID
-    positions, velocities, ids = ([] for _ in range(3))
+    positions, velocities, ids, masses = ([] for _ in range(4))
 
     # Load all adjacent boxes
-    for i, mini_box in enumerate(mini_box_ids):
-        file_name = f'mini_boxes_nside_{cells_per_side}/{mini_box}.hdf5'
-        with h5py.File(load_path + file_name, 'r') as hdf:
-            positions.append(hdf['part/pos'][()])
-            velocities.append(hdf['part/vel'][()])
-            ids.append(hdf['part/ID'][()])
+    try:
+        for i, mini_box in enumerate(mini_box_ids):
+            file_name = f'mini_boxes_nside_{cells_per_side}/{mini_box}.hdf5'
+            with h5py.File(load_path + file_name, 'r') as hdf:
+                positions.append(hdf[f'{particle_type}/pos'][()])
+                velocities.append(hdf[f'{particle_type}/vel'][()])
+                ids.append(hdf[f'{particle_type}/ID'][()])
+                
+                if hdf[f'{particle_type}/mass'].shape == ():
+                    masses = hdf[f'{particle_type}/mass'][()]
+                else:
+                    masses.append(hdf[f'{particle_type}/mass'][()])
+
+    except Exception as e:
+        print(f'Particle type not valid. {e}')
 
     # Concatenate all loaded data into single arrays
     positions = numpy.concatenate(positions)
     velocities = numpy.concatenate(velocities)
     ids = numpy.concatenate(ids)
+    if isinstance(masses, list):
+        masses = numpy.concatenate(masses)
 
     # Select particles within a padding distance of the edge of the box in each
     # direction. First determine the coordinates of the minibox center and then
@@ -649,8 +661,13 @@ def load_particles(
             f"No particles found within padding distance {padding} "
             f"of mini-box {mini_box_id}"
         )
+    
+    positions = positions[mask]
+    velocities = velocities[mask]
+    ids = ids[mask]
+    masses = masses[mask] if isinstance(masses, numpy.ndarray) else masses
 
-    return positions[mask], velocities[mask], ids[mask]
+    return positions, velocities, ids, masses
 
 
 def load_seeds(

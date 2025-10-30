@@ -39,7 +39,7 @@ COLOR_RED = '#db715b'
 
 def _compute_r200m_and_v200m(
     radial_distances: numpy.ndarray,
-    particle_mass: float,
+    particle_mass: Union[float, numpy.ndarray],
     mass_density: float
 ) -> Tuple[float, float]:
     """Compute overdensity radius R200m and circular velocity V200m for a halo.
@@ -54,7 +54,7 @@ def _compute_r200m_and_v200m(
     radial_distances : numpy.ndarray
         Array of radial distances from the halo center with shape (N,).
         Values must be non-negative.
-    particle_mass : float
+    particle_mass : Union[float, numpy.ndarray]
         Mass of each simulation particle. Must be positive.
     mass_density : float
         Mean matter density of the universe. Must be positive.
@@ -102,13 +102,16 @@ def _compute_r200m_and_v200m(
     """
     # Input validation
     if radial_distances.size == 0:
-        raise ValueError(f"radial_distances is empty")
-    _validate_inputs_positive_number_non_zero(particle_mass, 'particle_mass')
+        raise ValueError("radial_distances is empty")
     _validate_inputs_positive_number_non_zero(mass_density, 'mass_density')
 
+    if isinstance(particle_mass, numpy.ndarray) and \
+        (radial_distances.size != particle_mass.size):
+        raise ValueError("particle_mass must be of the same size as radial_distances")
+
     # Sort distances for cumulative mass profile
-    sorted_distances = numpy.sort(radial_distances)
-    n_particles = len(sorted_distances)
+    argsort = numpy.argsort(radial_distances)
+    sorted_distances = radial_distances[argsort]
 
     # Avoid division by zero for particles at the center. Replace zero distances 
     # with a small value
@@ -116,7 +119,11 @@ def _compute_r200m_and_v200m(
     sorted_distances = numpy.maximum(sorted_distances, min_distance)
 
     # Compute cumulative mass profile
-    mass_profile = particle_mass * numpy.arange(1, n_particles + 1)
+    if isinstance(particle_mass, numpy.ndarray):
+        mass_profile = numpy.cumulative_sum(particle_mass[argsort])
+    else:
+        n_particles = len(sorted_distances)
+        mass_profile = particle_mass * numpy.arange(1, n_particles + 1)
 
     # Compute volume-averaged densities
     volumes = (4.0 / 3.0) * numpy.pi * sorted_distances**3
@@ -155,7 +162,7 @@ def _get_candidate_seed_particle_data(
     boxsize: float,
     minisize: float,
     load_path: str,
-    particle_mass: float,
+    particle_type: str,
     mass_density: float,
 ) -> numpy.ndarray:
     """Extract and process particle data for all seeds within a single mini-box.
@@ -192,7 +199,10 @@ def _get_candidate_seed_particle_data(
         Path to directory containing the mini-box HDF5 files. The directory
         should contain a subdirectory named 'mini_boxes_nside_<xx>/' where <xx>
         is the number of cells per side.
-    particle_mass : float
+    particle_type : str
+        Particle type identifier within each HDF5 file. Valid names are 'dm', 
+        'gas' and 'star'. Default is 'dm' for same-mass objects.
+    particle_mass : Union[float, numpy.ndarray]
         Mass of each simulation particle. Must be positive.
     mass_density : float
         Mean matter density of the universe. Must be positive.
@@ -261,12 +271,11 @@ def _get_candidate_seed_particle_data(
     _validate_inputs_coordinate_arrays(velocity_seeds, 'seed velocities')
     _validate_inputs_existing_path(load_path)
     _validate_inputs_positive_number_non_zero(r_max, 'r_max')
-    _validate_inputs_positive_number_non_zero(particle_mass, 'particle_mass')
     _validate_inputs_positive_number_non_zero(mass_density, 'rhom')
 
     # Load particles in mini-box.
-    position_particles, velocity_particles, _ = \
-        load_particles(mini_box_id, boxsize, minisize, load_path)
+    position_particles, velocity_particles, _, mass_particles = \
+        load_particles(mini_box_id, boxsize, minisize, load_path, particle_type)
 
     # Iterate over seeds in current mini-box.
     radius, radial_velocity, log_velocity_squared = ([] for _ in range(3))
@@ -280,6 +289,8 @@ def _get_candidate_seed_particle_data(
         # Apply mask
         relative_position = relative_position[mask_close]
         relative_velocity = velocity_particles[mask_close] - velocity_seed_i
+        mass_particles = mass_particles[mask_close] if \
+            isinstance(mass_particles, numpy.ndarray) else mass_particles
 
         # Compute radial distance (L2 norm). No need to further filter by r_max
         # since we already applied a cubic mask.
@@ -289,8 +300,7 @@ def _get_candidate_seed_particle_data(
         vrp, _, v2p = velocity_components(relative_position, relative_velocity)
 
         # Compute R200m and M200m
-        r200m, v200m_sq = _compute_r200m_and_v200m(
-            rps, particle_mass, mass_density)
+        r200m, v200m_sq = _compute_r200m_and_v200m(rps, mass_particles, mass_density)
 
         # Append rescaled quantities to containers
         radius.append(rps / r200m)
@@ -567,7 +577,7 @@ def _select_candidate_seeds(
     boxsize: float,
     minisize: float,
     load_path: str,
-    particle_mass: float,
+    particle_type: str,
     mass_density: float,
     isolation_factor: float = 0.2,
     isolation_radius_factor: float = 2.0,
@@ -611,6 +621,9 @@ def _select_candidate_seeds(
         Path to directory containing the mini-box HDF5 files. The directory
         should contain a subdirectory named 'mini_boxes_nside_<xx>/' where <xx>
         is the number of cells per side.
+    particle_type : str
+        Particle type identifier within each HDF5 file. Valid names are 'dm', 
+        'gas' and 'star'. Default is 'dm' for same-mass objects.
     particle_mass : float
         Mass of each simulation particle. Must be positive.
     mass_density : float
@@ -694,7 +707,6 @@ def _select_candidate_seeds(
     _validate_inputs_positive_number_non_zero(r_max, 'r_max')
     _validate_inputs_existing_path(load_path)
     _validate_inputs_boxsize_minisize(boxsize, minisize)
-    _validate_inputs_positive_number_non_zero(particle_mass, 'particle_mass')
     _validate_inputs_positive_number_non_zero(mass_density, 'mass_density')
     if n_threads is not None:
         _validate_inputs_positive_number_non_zero(n_threads, 'n_threads')
@@ -736,7 +748,7 @@ def _select_candidate_seeds(
     # Set up multiprocessing
     processing_args = [
         (minibox_id, position_group, velocity_group, r_max, boxsize, minisize,
-         load_path, particle_mass, mass_density)
+         load_path, particle_type, mass_density)
         for minibox_id, (position_group, velocity_group) in minibox_groups.items()
     ]
 
@@ -915,7 +927,8 @@ def get_calibration_data(
     boxsize: float,
     minisize: float,
     save_path: str,
-    particle_mass: float,
+    particle_type: str,
+    # particle_mass: float,
     mass_density: float,
     redshift: float,
     isolation_factor: float = 0.2,
@@ -956,6 +969,9 @@ def get_calibration_data(
     save_path : str
         Directory path for reading/writing calibration data and diagnostic plots.
         Must be a valid directory path with read/write permissions.
+    particle_type : str
+        Particle type identifier within each HDF5 file. Valid names are 'seed', 
+        'dm', 'gas' and 'star'.
     particle_mass : float
         Mass of each simulation particle. Must be positive.
     mass_density : float
@@ -1083,7 +1099,8 @@ def get_calibration_data(
             boxsize=boxsize,
             minisize=minisize,
             load_path=save_path,
-            particle_mass=particle_mass,
+            particle_type=particle_type,
+            # particle_mass=particle_mass,
             mass_density=mass_density,
             isolation_factor=isolation_factor,
             isolation_radius_factor=isolation_radius_factor,
@@ -2227,7 +2244,8 @@ def self_calibration(
     boxsize: float,
     minisize: float,
     save_path: str,
-    particle_mass: float,
+    particle_type: str,
+    # particle_mass: float,
     mass_density: float,
     redshift: float,
     n_radial_bins: int = 20,
@@ -2449,7 +2467,8 @@ def self_calibration(
         boxsize=boxsize,
         minisize=minisize,
         save_path=save_path,
-        particle_mass=particle_mass,
+        particle_type=particle_type,
+        # particle_mass=particle_mass,
         mass_density=mass_density,
         redshift=redshift,
         n_threads=n_threads,
