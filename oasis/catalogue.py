@@ -282,10 +282,10 @@ class MiniBoxClassifier:
             Relative velocities of particles with respect to the halo center,
             shape (N, 3). Each row contains (vx, vy, vz) velocity components.
         r200 : float
-            Virial radius of the halo (R200), defining the boundary where the
-            mean enclosed density is 200 times the critical density.
+            Overdensity radius of the halo (R200), defining the boundary where 
+            the mean enclosed density is 200 times the critical density.
         m200 : float
-            Virial mass of the halo (M200), the mass enclosed within R200.
+            Overdensity mass of the halo (M200), the mass enclosed within R200.
         class_pars : list, tuple, or numpy.ndarray
             Classification parameters [m_pos, b_pos, m_neg, b_neg, alpha, beta, gamma]
             defining the orbiting/infalling boundary in phase space. These parameters
@@ -593,9 +593,9 @@ class MiniBoxClassifier:
             - vel : numpy.ndarray
                 3D velocity of the halo center.
             - R200b : float
-                Virial radius.
+                Overdensity radius.
             - M200b : float
-                Virial mass.
+                Overdensity mass.
             - Morb : float
                 Total orbiting mass.
             - Norb : int
