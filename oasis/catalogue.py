@@ -1517,6 +1517,3 @@ def run_orbiting_mass_assignment(
         os.removedirs(save_path)
 
     return None
-
-
-###
