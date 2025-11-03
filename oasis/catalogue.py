@@ -3,9 +3,9 @@ from functools import partial
 from multiprocessing import Pool
 from warnings import filterwarnings
 
-import h5py as h5
-import numpy as np
-import pandas as pd
+import h5py
+import numpy
+import pandas
 from scipy.optimize import fsolve
 from scipy.spatial import cKDTree
 from tqdm import tqdm
@@ -85,7 +85,7 @@ class MiniBoxClassifier:
         )
 
         if self.fast_mass:
-            m200b_mask = self.m200b > (5.0 * np.min(self.m200b))
+            m200b_mask = self.m200b > (5.0 * numpy.min(self.m200b))
 
             self.pos_seed = self.pos_seed[m200b_mask]
             self.vel_seed = self.vel_seed[m200b_mask]
@@ -122,11 +122,11 @@ class MiniBoxClassifier:
         ZeroDivisionError
             If `r200` or `rs` are zero.
         """
-        if np.any(self.rs == 0.) or np.any(self.r200b == 0.):
+        if numpy.any(self.rs == 0.) or numpy.any(self.r200b == 0.):
             raise ZeroDivisionError('Neither r200 nor rs can be zero.')
 
         c200 = self.r200b / self.rs
-        self.deltac = (200./3.) * (c200 ** 3 / (np.log(1 + c200) - (c200 / (1 + c200))))
+        self.deltac = (200./3.) * (c200 ** 3 / (numpy.log(1 + c200) - (c200 / (1 + c200))))
 
     @staticmethod
     def _rho_nfw_roots(
@@ -193,7 +193,7 @@ class MiniBoxClassifier:
         self.position_tree = cKDTree(self.pos_part, boxsize=self.boxsize)
 
     def _load_calibration_parameters(self):
-        with h5.File(self.load_path + "calibration_pars.hdf5", "r") as hdf:
+        with h5py.File(self.load_path + "calibration_pars.hdf5", "r") as hdf:
             self.pars = (
                 *hdf["pos"][()],
                 *hdf["neg/line"][()],
@@ -219,8 +219,8 @@ class MiniBoxClassifier:
         )
         
         # Empty dataframe with column names
-        self.haloes = pd.DataFrame(columns=col_names)
-        self.haloes_perc = pd.DataFrame(columns=col_names)
+        self.haloes = pandas.DataFrame(columns=col_names)
+        self.haloes_perc = pandas.DataFrame(columns=col_names)
 
         self.orb_hid = []
         self.orb_pid = []
@@ -229,32 +229,32 @@ class MiniBoxClassifier:
         self.n_tot_s = 0
 
         # If not -1 then seed is an orbiting structure
-        self.parent_id_seed = np.full(self.n_seeds, -1, dtype=int)
+        self.parent_id_seed = numpy.full(self.n_seeds, -1, dtype=int)
 
     # ==========================================================================
     @staticmethod
     def _classify(
-        rel_pos: np.ndarray,
-        rel_vel: np.ndarray,
+        rel_pos: numpy.ndarray,
+        rel_vel: numpy.ndarray,
         r200: float,
         m200: float,
-        class_pars: list | tuple | np.ndarray,
+        class_pars: list | tuple | numpy.ndarray,
         max_radius: float = 2.0,
         pivot_radius: float = 0.5
-    ) -> np.ndarray:
+    ) -> numpy.ndarray:
         """Classifies particles as orbiting.
 
         Parameters
         ----------
-        rel_pos : np.ndarray
+        rel_pos : numpy.ndarray
             Relative position of particles around seed
-        rel_vel : np.ndarray
+        rel_vel : numpy.ndarray
             Relative velocity of particles around seed
         r200 : float
             Seed R200
         m200 : float
             Seed M200
-        class_pars : Union[List, Tuple, np.ndarray]
+        class_pars : Union[List, Tuple, numpy.ndarray]
             Classification parameters [m_pos, b_pos, m_neg, b_neg]
         max_radius : float
             Maximum radius where orbiting particles can be found. All particles 
@@ -265,7 +265,7 @@ class MiniBoxClassifier:
 
         Returns
         -------
-        np.ndarray
+        numpy.ndarray
             A boolean array where True == orbiting
         """
         m_pos, b_pos, m_neg, b_neg, alpha, beta, gamma = class_pars
@@ -273,11 +273,11 @@ class MiniBoxClassifier:
         v200 = G_GRAVITY * m200 / r200
 
         # Compute the radius to seed_i in r200 units, and ln(v^2) in v200 units
-        part_ln_vel = np.log(np.sum(np.square(rel_vel), axis=1) / v200)
-        part_radius = np.sqrt(np.sum(np.square(rel_pos), axis=1)) / r200
+        part_ln_vel = numpy.log(numpy.sum(numpy.square(rel_vel), axis=1) / v200)
+        part_radius = numpy.sqrt(numpy.sum(numpy.square(rel_pos), axis=1)) / r200
 
         # Create a mask for particles with positive radial velocity
-        mask_vr_positive = np.sum(rel_vel * rel_pos, axis=1) > 0
+        mask_vr_positive = numpy.sum(rel_vel * rel_pos, axis=1) > 0
 
         # Orbiting classification for vr > 0
         line = m_pos * (part_radius - pivot_radius) + b_pos
@@ -307,7 +307,7 @@ class MiniBoxClassifier:
         # Select all particles around the seed
         within_r200b = self.position_tree.query_ball_point(self.pos_seed[i], 
                                                            2.*self.r200b[i],
-                                                           p=np.inf,
+                                                           p=numpy.inf,
                                                            return_sorted=True)
         # Skip if not enough particles within R200b
         if len(within_r200b) < self.min_num_part:
@@ -332,8 +332,8 @@ class MiniBoxClassifier:
     def _apply_6d_ball(
         self, 
         i: int, 
-        within_r200b: np.ndarray, 
-        orb_mask: np.ndarray,
+        within_r200b: numpy.ndarray, 
+        orb_mask: numpy.ndarray,
     ):
         """
         Apply 6D ball criterion for orbiting structures
@@ -342,7 +342,7 @@ class MiniBoxClassifier:
         rel_pos = relative_coordinates(self.pos_seed, self.pos_seed[i], 
                                        self.boxsize)
         r_max = 2.0 * self.r200b[i]
-        mask_seed = (np.sum(np.square(rel_pos[i+1:]), axis=1) <= r_max**2) & \
+        mask_seed = (numpy.sum(numpy.square(rel_pos[i+1:]), axis=1) <= r_max**2) & \
             (self.parent_id_seed[i+1:] == -1)
 
         # Skip if not enough seeds within 2*R200b
@@ -364,18 +364,18 @@ class MiniBoxClassifier:
         j = 0
         is_halo = True
         orb_seeds = []
-        orb_mask_new = np.copy(orb_mask)
+        orb_mask_new = numpy.copy(orb_mask)
 
         while is_halo and (j < n_seeds_near):
             # Select particles around jth seed.
             rel_pos_part = relative_coordinates(self.pos_part[within_r200b],
                                                 pos_near[j], self.boxsize)
             rel_vel_part = self.vel_part[within_r200b] - vel_near[j]
-            rp_sq = np.sum(np.square(rel_pos_part), axis=1)
-            vp_sq = np.sum(np.square(rel_vel_part), axis=1)
+            rp_sq = numpy.sum(numpy.square(rel_pos_part), axis=1)
+            vp_sq = numpy.sum(numpy.square(rel_vel_part), axis=1)
 
             # Distance from the current seed to the substructure.
-            r_ij = np.linalg.norm(rel_pos[j])
+            r_ij = numpy.linalg.norm(rel_pos[j])
             
             # Defines the search radius of the 6D ball. Distance from the 
             # substructure where the NFW density of both objects is equal.
@@ -390,7 +390,7 @@ class MiniBoxClassifier:
                     rs_near[j], 
                     r_ij
                 ))
-            r_ball = np.min([r_ball[0], r200b_near[j]])
+            r_ball = numpy.min([r_ball[0], r200b_near[j]])
 
             # Defines the search velocity  of the 6D ball.
             v_ball_sq = 2**2 * G_GRAVITY * m200b_near[j] / r200b_near[j]
@@ -404,8 +404,8 @@ class MiniBoxClassifier:
             # orbiting, the seed is tagged as orbiting. The seed is infalling 
             # otherwise and all the particles within the box are tagged as 
             # infalling too.
-            upper_threshold = 1. - np.exp(-(r_ij / r200b_near[j])**2)
-            f_threshold = np.max([0.5, upper_threshold])
+            upper_threshold = 1. - numpy.exp(-(r_ij / r200b_near[j])**2)
+            f_threshold = numpy.max([0.5, upper_threshold])
 
             if frac_inside >= f_threshold:
                 orb_seeds.append(hid_near[j])
@@ -447,18 +447,18 @@ class MiniBoxClassifier:
             orb_mask_final, orb_seeds = result_2
             
             # Set parent halo ID for seeds (these are no longer free).
-            mask_subs = np.isin(self.hid[i+1:], orb_seeds)
+            mask_subs = numpy.isin(self.hid[i+1:], orb_seeds)
             self.parent_id_seed[i+1:][mask_subs] = self.hid[i]
             n_subs = mask_subs.sum()
 
         # Compute orbiting mass, and append orbiting objects to global lists
         n_orb = orb_mask_final.sum()
-        if isinstance(self.mass_part, np.ndarray):
-            morb = np.sum(self.mass_part[within_r200b][orb_mask_final])
+        if isinstance(self.mass_part, numpy.ndarray):
+            morb = numpy.sum(self.mass_part[within_r200b][orb_mask_final])
             self.orb_mass.append(self.mass_part[within_r200b][orb_mask_final])
         else:
             morb = n_orb * self.mass_part
-            self.orb_mass.append(np.full(n_orb, self.mass_part))
+            self.orb_mass.append(numpy.full(n_orb, self.mass_part))
         
         self.orb_hid.append(orb_seeds)
         self.orb_pid.append(self.pid_part[within_r200b][orb_mask_final])
@@ -501,16 +501,16 @@ class MiniBoxClassifier:
                 
 
         if results:
-            df = pd.DataFrame(results)
-            self.haloes = pd.concat([self.haloes, df], ignore_index=True)
+            df = pandas.DataFrame(results)
+            self.haloes = pandas.concat([self.haloes, df], ignore_index=True)
         
         # Sort haloes by their orbiting mass
         self.haloes.sort_values(by='Morb', ascending=False, inplace=True, 
                                 ignore_index=True)
 
-        self.orb_hid = np.concatenate(self.orb_hid).astype(self.hid[0].dtype)
-        self.orb_pid = np.concatenate(self.orb_pid).astype(self.pid_part[0].dtype)
-        self.orb_mass = np.concatenate(self.orb_mass)
+        self.orb_hid = numpy.concatenate(self.orb_hid).astype(self.hid[0].dtype)
+        self.orb_pid = numpy.concatenate(self.orb_pid).astype(self.pid_part[0].dtype)
+        self.orb_mass = numpy.concatenate(self.orb_mass)
 
     # ==========================================================================
     def _percolation(self):
@@ -550,8 +550,8 @@ class MiniBoxClassifier:
                 continue
 
             # Compute final orbiting mass
-            mask = np.isin(pid_range, np.array(new_orb))
-            morb = np.sum(np.array(self.orb_mass[lidx:ridx])[mask])
+            mask = numpy.isin(pid_range, numpy.array(new_orb))
+            morb = numpy.sum(numpy.array(self.orb_mass[lidx:ridx])[mask])
 
             # Select seeds not orbiting anything more massive.
             hid_range = self.orb_hid[slidx:sridx]
@@ -587,8 +587,8 @@ class MiniBoxClassifier:
             n_tot_s_perc += n_orb_s
 
         # Concatenate lists into arrays
-        self.orb_pid_perc = np.concatenate(orb_pid_perc) if orb_pid_perc else np.array([])
-        self.orb_hid_perc = np.concatenate(orb_hid_perc) if orb_hid_perc else np.array([])
+        self.orb_pid_perc = numpy.concatenate(orb_pid_perc) if orb_pid_perc else numpy.array([])
+        self.orb_hid_perc = numpy.concatenate(orb_hid_perc) if orb_hid_perc else numpy.array([])
         
         # If no haloes where fuond in this mini-box
         if len(self.haloes_perc.index) <= 0:
@@ -602,17 +602,17 @@ class MiniBoxClassifier:
 
         full_path = self.save_path + f"{self.mini_box_id}.hdf5"
         dtypes = (
-            np.uint32, np.float32, np.float32, np.float32, np.float32, np.float32,
-            np.uint32, np.uint32, np.uint32, None, np.int32, np.uint32, np.uint32,
-            np.uint32
+            numpy.uint32, numpy.float32, numpy.float32, numpy.float32, numpy.float32, numpy.float32,
+            numpy.uint32, numpy.uint32, numpy.uint32, None, numpy.int32, numpy.uint32, numpy.uint32,
+            numpy.uint32
         )
-        with h5.File(full_path, "w") as hdf:
+        with h5py.File(full_path, "w") as hdf:
             # Halo catalogue
             for i, key in enumerate(self.haloes_perc.columns):
                 if key == 'INMB':
                     continue
                 if key in ['pos', 'vel']:
-                    data = np.stack(self.haloes_perc[key].values)
+                    data = numpy.stack(self.haloes_perc[key].values)
                 else:
                     data = self.haloes_perc[key].values
                 hdf.create_dataset(f'halo/{key}', data=data, dtype=dtypes[i])
@@ -667,7 +667,7 @@ def process_all_miniboxes(
     ensure_dir_exists(save_path)
 
     # Number of miniboxes
-    n_mini_boxes = np.int_(np.ceil(boxsize / minisize))**3
+    n_mini_boxes = numpy.int_(numpy.ceil(boxsize / minisize))**3
     
     # Cap the number of threads to the total number of mini-boxes to process
     if n_threads is None:
@@ -728,14 +728,14 @@ def merge_catalogues(
     if first_file is None:
         raise FileNotFoundError("No mini-box catalogue files found.")
     
-    with h5.File(first_file, 'r') as hdf_load:
+    with h5py.File(first_file, 'r') as hdf_load:
         halo_keys = list((hdf_load['halo'].keys()))
     
     # Load and concatenate data
     halo_data = {key: [] for key in halo_keys}
 
     n_part, n_seed = 0, 0
-    hdf_memb = h5.File(load_path + f'run_{run_name}/members.hdf5', 'w')
+    hdf_memb = h5py.File(load_path + f'run_{run_name}/members.hdf5', 'w')
     for i in tqdm(range(n_mini_boxes), ncols=100, desc='Merging catalogues',
                   colour='green'):
         
@@ -744,7 +744,7 @@ def merge_catalogues(
         if not os.path.exists(file_path):
             continue
 
-        with h5.File(file_path, 'r') as hdf_load:
+        with h5py.File(file_path, 'r') as hdf_load:
             if 'halo' not in hdf_load.keys():
                 continue
             # Member data ======================================================
@@ -792,19 +792,19 @@ def merge_catalogues(
     hdf_memb.close()
 
     # Set the seed index to -1 for all those haloes without subhaloes.
-    slidx = np.concatenate(halo_data.get("SLIDX", []), dtype=np.int32)
-    sridx = np.concatenate(halo_data.get("SRIDX", []), dtype=np.int32)
+    slidx = numpy.concatenate(halo_data.get("SLIDX", []), dtype=numpy.int32)
+    sridx = numpy.concatenate(halo_data.get("SRIDX", []), dtype=numpy.int32)
     mask = (sridx-slidx == 0)
     slidx[mask] = -1
     sridx[mask] = -1
 
-    with h5.File(load_path + f'run_{run_name}/catalogue.hdf5', 'w') as hdf:
+    with h5py.File(load_path + f'run_{run_name}/catalogue.hdf5', 'w') as hdf:
         hdf.create_dataset('SLIDX', data=slidx)
         hdf.create_dataset('SRIDX', data=sridx)
         for key, chunks in halo_data.items():
             if key in {'SLIDX', 'SRIDX'}:
                 continue
-            hdf.create_dataset(key, data=np.concatenate(chunks))
+            hdf.create_dataset(key, data=numpy.concatenate(chunks))
     
     return None
 
@@ -860,7 +860,7 @@ def run_orbiting_mass_assignment(
         n_threads=n_threads,
     )
 
-    n_mini_boxes = np.int_(np.ceil(boxsize / minisize))**3
+    n_mini_boxes = numpy.int_(numpy.ceil(boxsize / minisize))**3
     merge_catalogues(
         load_path=load_path,
         run_name=run_name,
