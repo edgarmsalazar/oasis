@@ -7,11 +7,10 @@ import h5py
 import numpy
 from tqdm import tqdm
 
-from oasis.common import (TimerContext, _validate_inputs_boxsize_minisize,
-                          _validate_inputs_coordinate_arrays,
-                          _validate_inputs_load, _validate_inputs_mini_box_id,
-                          _validate_inputs_process_objects, ensure_dir_exists,
-                          get_min_unit_dtype)
+from oasis.common import (TimerContext, _validate_boxsize_minisize,
+                          _validate_coordinate_array, _validate_inputs_load,
+                          _validate_mini_box_id, _validate_process_objects,
+                          ensure_dir_exists, get_min_uint_dtype)
 from oasis.coordinates import relative_coordinates
 
 __all__ = [
@@ -84,8 +83,8 @@ def get_mini_box_id(
     EDGE_TOL = 1e-8
 
     # Input validation
-    _validate_inputs_coordinate_arrays(position, name="position")
-    _validate_inputs_boxsize_minisize(boxsize, minisize)
+    _validate_coordinate_array(position, name="position")
+    _validate_boxsize_minisize(boxsize, minisize)
 
     # Validate coordinate bounds
     if numpy.any(position < 0) or numpy.any(position > boxsize):
@@ -190,10 +189,10 @@ def get_adjacent_mini_box_ids(
     111
     """
     # Input validation
-    _validate_inputs_boxsize_minisize(boxsize, minisize)
+    _validate_boxsize_minisize(boxsize, minisize)
 
     cells_per_side = int(numpy.ceil(boxsize / minisize))
-    _validate_inputs_mini_box_id(mini_box_id, cells_per_side)
+    _validate_mini_box_id(mini_box_id, cells_per_side)
 
     # Grid parameters
     total_mini_boxes = cells_per_side**3
@@ -341,7 +340,7 @@ def split_simulation_into_mini_boxes(
     # memory usage. This is important for large simulations with billions of 
     # particles.
     chunksize = int(max(1, numpy.ceil(n_items / n_cells)))  # Ensure chunksize >= 1
-    uint_dtype = get_min_unit_dtype(n_cells)
+    uint_dtype = get_min_uint_dtype(n_cells)
     mini_box_ids = numpy.zeros(n_items, dtype=uint_dtype)
 
     def get_chunk_mini_box_ids(i):
@@ -358,6 +357,7 @@ def split_simulation_into_mini_boxes(
     else:
         n_threads = min(n_threads, n_chunks)
 
+    # Safely handle multiprocessing falure with a fall back to a single thread.
     if n_threads > 1:
         try:
             with ThreadPool(n_threads) as pool:
@@ -369,6 +369,7 @@ def split_simulation_into_mini_boxes(
                   "falling back to sequential")
             # Fall back to sequential processing
             n_threads = 1
+            
     if n_threads == 1:
         for chunk in tqdm(range(n_chunks), desc='Computing IDs', ncols=100, 
                           colour='blue'):
@@ -385,7 +386,7 @@ def split_simulation_into_mini_boxes(
         data_arrays, data_labels, data_dtypes = props
 
     # Get smallest data type to represent IDs
-    uint_dtype_pid = get_min_unit_dtype(numpy.max(uid))
+    uint_dtype_pid = get_min_uint_dtype(numpy.max(uid))
 
     # For each mini-box, save all items in that box to a separate HDF5 file.
     def write_mini_box(box_id):
@@ -447,10 +448,41 @@ def process_simulation_data(
     data: Optional[Tuple[Tuple[numpy.ndarray], Tuple[str], Tuple[numpy.dtype]]] = None,
     n_threads: Optional[int] = None,
 ) -> None:
+    """
+    Validate and process simulation particle data before saving.
+
+    Parameters
+    ----------
+    save_path : str
+        Path to save processed data.
+    particle_type : str
+        Particle category (e.g., "dm", "gas", "stars").
+    boxsize : float
+        Simulation box size.
+    minisize : float
+        Size of smaller sub-boxes.
+    positions : numpy.ndarray
+        Particle position array of shape (N, 3).
+    velocities : numpy.ndarray
+        Particle velocity array of shape (N, 3).
+    ids : numpy.ndarray
+        Unique particle IDs of shape (N,).
+    mass : tuple of (float or numpy.ndarray, str)
+        Mass information and corresponding label.
+    data : tuple, optional
+        Additional simulation arrays with (arrays, labels, dtypes).
+    n_threads : int, optional
+        Number of threads to use for parallel operations.
+
+    Raises
+    ------
+    ValueError
+        If arrays have mismatched lengths or invalid types.
+    """
     # Validate inputs
-    _validate_inputs_boxsize_minisize(boxsize, minisize)
-    _validate_inputs_coordinate_arrays(positions, "positions")
-    _validate_inputs_coordinate_arrays(velocities, "velocities")
+    _validate_boxsize_minisize(boxsize, minisize)
+    _validate_coordinate_array(positions, "positions")
+    _validate_coordinate_array(velocities, "velocities")
 
     if ids.ndim != 1:
         raise ValueError("ids must be a 1D array")
@@ -476,7 +508,7 @@ def process_simulation_data(
     
     # Validate seed data shape and type
     if data:
-        _validate_inputs_process_objects(data, positions.shape[0])
+        _validate_process_objects(data, positions.shape[0])
     
     # Determine number of partitions per side
     cells_per_side = int(numpy.ceil(boxsize / minisize))
@@ -869,6 +901,3 @@ def load_seeds(
     mini_box_mask = mini_box_mask[argorder]
 
     return positions, velocities, ids, r200, m200, rs, mini_box_mask
-
-
-###

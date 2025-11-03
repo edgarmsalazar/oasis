@@ -12,13 +12,13 @@ from scipy.spatial import cKDTree
 from scipy.stats import iqr as interquartile_range
 from tqdm import tqdm
 
-from oasis.common import (G_GRAVITY, _validate_inputs_boxsize_minisize,
-                          _validate_inputs_coordinate_arrays,
-                          _validate_inputs_existing_path,
-                          _validate_inputs_mini_box_id,
-                          _validate_inputs_positive_number,
-                          _validate_inputs_positive_number_non_zero,
-                          _validate_inputs_seed_data)
+from oasis.common import (G_GRAVITY, _validate_boxsize_minisize,
+                          _validate_coordinate_array,
+                          _validate_existing_path,
+                          _validate_mini_box_id,
+                          _validate_positive_number,
+                          _validate_positive_number_non_zero,
+                          _validate_seed_data)
 from oasis.coordinates import relative_coordinates, velocity_components
 from oasis.minibox import get_mini_box_id, load_particles
 
@@ -42,7 +42,8 @@ def _compute_r200m_and_v200m(
     particle_mass: Union[float, numpy.ndarray],
     mass_density: float
 ) -> Tuple[float, float]:
-    """Compute overdensity radius R200m and circular velocity V200m for a halo.
+    """
+    Compute overdensity radius R200m and circular velocity V200m for a halo.
 
     This function calculates the overdensity radius R200m and corresponding 
     circular velocity V200m of a halo by analyzing the radial density profile. 
@@ -103,7 +104,7 @@ def _compute_r200m_and_v200m(
     # Input validation
     if radial_distances.size == 0:
         raise ValueError("radial_distances is empty")
-    _validate_inputs_positive_number_non_zero(mass_density, 'mass_density')
+    _validate_positive_number_non_zero(mass_density, 'mass_density')
 
     if isinstance(particle_mass, numpy.ndarray) and \
         (radial_distances.size != particle_mass.size):
@@ -165,7 +166,8 @@ def _get_candidate_seed_particle_data(
     particle_type: str,
     mass_density: float,
 ) -> numpy.ndarray:
-    """Extract and process particle data for all seeds within a single mini-box.
+    """
+    Extract and process particle data for all seeds within a single mini-box.
 
     This function loads particles from a specified mini-box and its neighbors, then
     processes each seed to compute scaled radial distances, radial velocities, and
@@ -265,13 +267,13 @@ def _get_candidate_seed_particle_data(
     >>> print(f"Processed {data.shape[1]} particles from {len(pos_seeds)} seeds")
     """
     # Validate inputs
-    _validate_inputs_boxsize_minisize(boxsize, minisize)
-    _validate_inputs_mini_box_id(mini_box_id, int(numpy.ceil(boxsize/minisize)))
-    _validate_inputs_coordinate_arrays(position_seeds, 'seed positions')
-    _validate_inputs_coordinate_arrays(velocity_seeds, 'seed velocities')
-    _validate_inputs_existing_path(load_path)
-    _validate_inputs_positive_number_non_zero(r_max, 'r_max')
-    _validate_inputs_positive_number_non_zero(mass_density, 'rhom')
+    _validate_boxsize_minisize(boxsize, minisize)
+    _validate_mini_box_id(mini_box_id, int(numpy.ceil(boxsize/minisize)))
+    _validate_coordinate_array(position_seeds, 'seed positions')
+    _validate_coordinate_array(velocity_seeds, 'seed velocities')
+    _validate_existing_path(load_path)
+    _validate_positive_number_non_zero(r_max, 'r_max')
+    _validate_positive_number_non_zero(mass_density, 'rhom')
 
     # Load particles in mini-box.
     position_particles, velocity_particles, _, mass_particles = \
@@ -329,7 +331,8 @@ def _find_isolated_seeds(
     isolation_factor: float = 0.2,
     isolation_radius_factor: float = 2.0,
 ) -> numpy.ndarray:
-    """Find seeds that are isolated from other massive neighbors.
+    """
+    Find seeds that are isolated from other massive neighbors.
 
     This function identifies seeds that dominate their local environment by
     checking that all neighboring seeds within a specified isolation radius
@@ -425,11 +428,11 @@ def _find_isolated_seeds(
     ... )
     """
     # Input validation
-    _validate_inputs_coordinate_arrays(position, 'position')
-    _validate_inputs_positive_number_non_zero(max_seeds, 'max_seeds')
-    _validate_inputs_positive_number_non_zero(boxsize, 'boxsize')
-    _validate_inputs_positive_number_non_zero(isolation_factor, 'isolation_factor')
-    _validate_inputs_positive_number_non_zero(
+    _validate_coordinate_array(position, 'position')
+    _validate_positive_number_non_zero(max_seeds, 'max_seeds')
+    _validate_positive_number_non_zero(boxsize, 'boxsize')
+    _validate_positive_number_non_zero(isolation_factor, 'isolation_factor')
+    _validate_positive_number_non_zero(
         isolation_radius_factor, 'isolation_radius_factor')
 
     # This should never be needed as all seeds are assumed to have different
@@ -490,7 +493,8 @@ def _group_seeds_by_minibox(
     boxsize: float,
     minisize: float,
 ) -> Dict[int, Tuple[numpy.ndarray, numpy.ndarray]]:
-    """Group seeds by their containing mini-box for efficient parallel processing.
+    """
+    Group seeds by their containing mini-box for efficient parallel processing.
 
     This function assigns each seed to its containing mini-box based on spatial
     coordinates and returns a dictionary mapping mini-box IDs to the positions
@@ -553,9 +557,9 @@ def _group_seeds_by_minibox(
     ...     print(f"Minibox {box_id}: {len(pos)} seeds")
     """
     # Validate inputs
-    _validate_inputs_coordinate_arrays(position, 'position')
-    _validate_inputs_coordinate_arrays(velocity, 'velocity')
-    _validate_inputs_boxsize_minisize(boxsize, minisize)
+    _validate_coordinate_array(position, 'position')
+    _validate_coordinate_array(velocity, 'velocity')
+    _validate_boxsize_minisize(boxsize, minisize)
 
     # Get mini-box IDs for all seeds
     mini_box_ids = get_mini_box_id(position, boxsize, minisize)
@@ -583,7 +587,8 @@ def _select_candidate_seeds(
     isolation_radius_factor: float = 2.0,
     n_threads: Optional[int] = None,
 ) -> tuple[numpy.ndarray]:
-    """Select isolated massive seeds and extract scaled particle data around them.
+    """
+    Select isolated massive seeds and extract scaled particle data around them.
 
     This function identifies the most massive isolated seeds from the input
     catalog and loads particles within r_max of each seed to compute r/R200m and 
@@ -702,14 +707,14 @@ def _select_candidate_seeds(
     >>> print(f"Processed {len(results)} particles from isolated seeds")
     """
     # Validate inputs
-    _validate_inputs_positive_number_non_zero(n_seeds, 'n_seeds')
-    _validate_inputs_seed_data(seed_data)
-    _validate_inputs_positive_number_non_zero(r_max, 'r_max')
-    _validate_inputs_existing_path(load_path)
-    _validate_inputs_boxsize_minisize(boxsize, minisize)
-    _validate_inputs_positive_number_non_zero(mass_density, 'mass_density')
+    _validate_positive_number_non_zero(n_seeds, 'n_seeds')
+    _validate_seed_data(seed_data)
+    _validate_positive_number_non_zero(r_max, 'r_max')
+    _validate_existing_path(load_path)
+    _validate_boxsize_minisize(boxsize, minisize)
+    _validate_positive_number_non_zero(mass_density, 'mass_density')
     if n_threads is not None:
-        _validate_inputs_positive_number_non_zero(n_threads, 'n_threads')
+        _validate_positive_number_non_zero(n_threads, 'n_threads')
 
     # Unpack seed data
     position, velocity, mass, radius = seed_data
@@ -937,7 +942,8 @@ def get_calibration_data(
     diagnostics: bool = True,
     overwrite: bool = False,
 ) -> Tuple[numpy.ndarray]:
-    """Generate or load calibration data from isolated massive seed halos.
+    """
+    Generate or load calibration data from isolated massive seed halos.
 
     This function either loads pre-computed calibration data from an HDF5 file
     or generates new calibration data by processing particles around isolated
@@ -1077,7 +1083,7 @@ def get_calibration_data(
     ... )
     """
     file_name = save_path + 'calibration_data.hdf5'
-    _validate_inputs_positive_number(redshift, 'redshift')
+    _validate_positive_number(redshift, 'redshift')
     
     # Flag to trigger except clause given the overwrite flag.
     execute_fallback = overwrite
@@ -1132,7 +1138,8 @@ def get_calibration_data(
 
 
 def _cost_percentile(abscissa: float, *data) -> float:
-    """Compute cost for fitting line abscissa to achieve target percentile.
+    """
+    Compute cost for fitting line abscissa to achieve target percentile.
 
     This cost function optimizes the y-intercept (at a pivot radius) of a line
     with fixed slope such that a specified percentile of data points falls below
@@ -1222,7 +1229,8 @@ def _cost_percentile(abscissa: float, *data) -> float:
 
 
 def _cost_perpendicular_distance_abscissa(abscissa: float, *data) -> float:
-    """Compute cost for fitting line abscissa to maximize perpendicular distances.
+    """
+    Compute cost for fitting line abscissa to maximize perpendicular distances.
 
     This cost function optimizes the y-intercept (at a pivot radius) of a line
     with fixed slope to maximize the mean squared perpendicular distance of
@@ -1319,7 +1327,8 @@ def _cost_perpendicular_distance_abscissa(abscissa: float, *data) -> float:
     
 
 def _cost_perpendicular_distance_slope(slope: float, *data) -> float:
-    """Compute cost for fitting line slope to maximize perpendicular distances.
+    """
+    Compute cost for fitting line slope to maximize perpendicular distances.
 
     This cost function optimizes the slope of a line with fixed y-intercept
     (at a pivot radius) to maximize the mean squared perpendicular distance
@@ -1422,7 +1431,8 @@ def _diagnostic_gradient_minima_plot(
     counts_gradient_minima: numpy.ndarray,
     diagnostics_title: str,
 ) -> None:
-    """Generate diagnostic plots for ln(v^2) gradient minimum in radial bins.
+    """
+    Generate diagnostic plots for ln(v^2) gradient minimum in radial bins.
 
     This function creates an (n, m)-panel plot showing the distribution of 
     ln(v^2/V200m^2), its gradient and a smoothed gradient in radial bins 
@@ -1551,7 +1561,8 @@ def _gradient_minima(
     diagnostics: bool = True,
     diagnostics_title: Optional[str] = None,
 ) -> Tuple[numpy.ndarray]:
-    """Find gradient minima in KE-radius phase space to identify boundaries.
+    """
+    Find gradient minima in KE-radius phase space to identify boundaries.
 
     This function find the minimum of the ln(v^2/V200m^2) distribution as a 
     function of radius by computing histograms in radial bins, then finding the 
@@ -1761,9 +1772,9 @@ def _gradient_minima(
     >>> plt.show()
     """
     # Validate inputs
-    _validate_inputs_positive_number_non_zero(n_radial_bins, 'n_radial_bins')
-    _validate_inputs_positive_number(r_min, 'r_min')
-    _validate_inputs_positive_number_non_zero(sigma_smooth, 'sigma_smooth')
+    _validate_positive_number_non_zero(n_radial_bins, 'n_radial_bins')
+    _validate_positive_number(r_min, 'r_min')
+    _validate_positive_number_non_zero(sigma_smooth, 'sigma_smooth')
 
     if r_min >= r_max:
         raise ValueError('r_max must be larger than r_min')
@@ -1842,7 +1853,8 @@ def _hist2d_mesh(
     n_bins: int,
     gradient: bool = False,
 ) -> Tuple[numpy.ndarray]:
-    """Compute 2D histogram with optional gradient for phase space analysis.
+    """
+    Compute 2D histogram with optional gradient for phase space analysis.
 
     This function creates a 2D histogram of (x, y) data and optionally computes
     the gradient of the histogram density with respect to y in each x bin.
@@ -1939,6 +1951,7 @@ def _hist2d_mesh(
     >>> ridge_mask = np.abs(grad) < 0.1
     >>> plt.scatter(x_mesh[ridge_mask], y_mesh[ridge_mask], c='red', s=1)
     """
+    _validate_positive_number_non_zero(n_bins, "n_bins")
     
     hist_z, hist_x, hist_y = numpy.histogram2d(x, y, bins=n_bins, range=limits,
                                                density=True)
@@ -1964,7 +1977,8 @@ def _hist2d_mesh(
 
 
 def _smooth_2d_hist(arr: numpy.ndarray, sigma: float = 2.0) -> numpy.ndarray:
-    """Apply Gaussian smoothing to 2D histogram for noise reduction.
+    """
+    Apply Gaussian smoothing to 2D histogram for noise reduction.
 
     This function smooths a 2D array (typically a histogram or density map) using
     a Gaussian filter. Smoothing reduces statistical noise and makes underlying
@@ -2076,29 +2090,112 @@ def _diagnostic_self_calibration_plot(
     parameters: Tuple[float],
     gradient_values: Tuple[numpy.ndarray],
 ) -> None:
-    """_summary_
+    """
+    Generate diagnostic plots showing calibrated classification boundaries.
+
+    This function creates a 2x2 panel diagnostic plot visualizing the
+    self-calibrated phase-space classification scheme. The top panels show
+    particle distributions with fitted classification boundaries, while the
+    bottom panels display gradient fields used to determine optimal cut lines.
+    Separate visualizations are provided for positive and negative radial
+    velocity regimes.
 
     Parameters
     ----------
     save_path : str
-        _description_
+        Directory path where the diagnostic plot will be saved. Must be a valid
+        directory path with write permissions. The plot is saved as
+        'calibration_classification_lines.png'.
     radius : numpy.ndarray
-        _description_
+        Array of radial distances scaled by R200m with shape (n_particles,).
+        Values should typically be positive and in the range [0, 2].
     radial_velocity : numpy.ndarray
-        _description_
+        Array of radial velocities scaled by V200m with shape (n_particles,).
+        Values can be positive (outflow) or negative (inflow). Used to
+        separate particles into two regimes.
     log_velocity_squared : numpy.ndarray
-        _description_
+        Array of natural logarithm of velocity squared scaled by V200m^2 with
+        shape (n_particles,). Values typically range from -2 to +2.5.
     parameters : Tuple[float]
-        _description_
+        Calibrated classification parameters in the following order:
+        (radius_pivot, slope_positive_vr, abscissa_positive_vr,
+         slope_negative_vr, abscissa_negative_vr, alpha, beta, gamma).
+        - radius_pivot: Transition radius between linear and quadratic regimes
+        - slope_positive_vr, abscissa_positive_vr: Linear cut for vr > 0
+        - slope_negative_vr, abscissa_negative_vr: Linear cut for vr < 0 at r > pivot
+        - alpha, beta, gamma: Quadratic coefficients for vr < 0 at r < pivot
     gradient_values : Tuple[numpy.ndarray]
-        _description_
+        Gradient analysis results in the following order:
+        (radial_bins_positive, gradient_minimum_positive,
+         radial_bins_negative, gradient_minimum_negative).
+        Each array contains the radial bins and corresponding gradient minima
+        used to determine classification boundaries.
 
     Returns
     -------
-    _type_
-        _description_
-    """
+    None
+        Function saves the plot to disk but returns nothing.
 
+    Raises
+    ------
+    ValueError
+        If array shapes are incompatible or if parameters tuple has incorrect length.
+    OSError
+        If save_path directory doesn't exist or lacks write permissions.
+
+    See Also
+    --------
+    _diagnostic_calibration_data_plot : Visualizes raw calibration data without cuts.
+    _hist2d_mesh : Computes 2D histogram and returns x, y, z as meshgrids.
+    _smooth_2d_hist : Applies Gaussian smoothing to 2D histograms.
+
+    Notes
+    -----
+    Figure structure (2x2 panels):
+    - Top-left: Particle counts for vr > 0 with linear classification boundary
+    - Top-right: Particle counts for vr < 0 with hybrid linear/quadratic boundary
+    - Bottom-left: Gradient field for vr > 0 showing optimal cut determination
+    - Bottom-right: Gradient field for vr < 0 showing optimal cut determination
+
+    The classification boundary for vr < 0 transitions from quadratic to linear
+    at the pivot radius to better capture the orbital/infalling transition at
+    small radii.
+
+    Plot specifications:
+    - Uses 200x200 bins for 2D histograms
+    - Plot ranges: r/R200m ∈ [0,2], ln(v^2/V200m^2) ∈ [-2,2.5]
+    - Uses 'terrain' colormap with 80 contour levels
+    - Includes LaTeX-formatted equations for classification boundaries
+    - Saved at 300 DPI for publication quality
+    - Colorbar shows relative counts without specific tick values
+
+    The gradient panels show where the phase-space density gradient is steepest,
+    which corresponds to the optimal location for classification boundaries
+    separating orbiting from infalling populations.
+
+    Examples
+    --------
+    >>> # Visualize calibrated classification scheme
+    >>> radii = numpy.random.uniform(0.1, 2.0, 50000)
+    >>> vr = numpy.random.normal(0, 1, 50000)
+    >>> log_v2 = numpy.random.normal(0, 1.5, 50000)
+    >>> params = (0.5, 1.5, 0.2, 1.0, 0.1, 2.0, 1.0, 0.5)
+    >>> grad_vals = (
+    ...     numpy.linspace(0, 2, 100),
+    ...     numpy.random.uniform(-1, 1, 100),
+    ...     numpy.linspace(0, 2, 100),
+    ...     numpy.random.uniform(-1, 1, 100)
+    ... )
+    >>> _diagnostic_self_calibration_plot(
+    ...     save_path="/output/plots/",
+    ...     radius=radii,
+    ...     radial_velocity=vr,
+    ...     log_velocity_squared=log_v2,
+    ...     parameters=params,
+    ...     gradient_values=grad_vals
+    ... )
+    >>> # Plot saved to /output/plots/calibration_classification_lines.png
+    """
     pyplot.rcParams.update({
         "text.usetex": True,
         "font.family": "serif",
@@ -2245,7 +2342,6 @@ def self_calibration(
     minisize: float,
     save_path: str,
     particle_type: str,
-    # particle_mass: float,
     mass_density: float,
     redshift: float,
     n_radial_bins: int = 20,
@@ -2259,7 +2355,8 @@ def self_calibration(
     diagnostics: bool = True,
     overwrite: bool = False,
 ) -> None:
-    """Runs calibration from isolated halo samples.
+    """
+    Runs calibration from isolated halo samples.
 
     This function calibrates boundary lines in kinetic energy-radius phase space
     by analyzing particle distributions around isolated massive halos. Separately
@@ -2468,7 +2565,6 @@ def self_calibration(
         minisize=minisize,
         save_path=save_path,
         particle_type=particle_type,
-        # particle_mass=particle_mass,
         mass_density=mass_density,
         redshift=redshift,
         n_threads=n_threads,
@@ -2633,7 +2729,8 @@ def calibrate(
     omega_m: Optional[float] = None,
     **kwargs,
 ) -> None:
-    """Calibrate halo finder parameters using cosmology-based or simulation-based 
+    """
+    Calibrate halo finder parameters using cosmology-based or simulation-based 
     approach.
 
     This is a high-level interface function that provides two calibration modes:

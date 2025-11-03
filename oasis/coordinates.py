@@ -1,7 +1,7 @@
 import numpy
 
-from oasis.common import (_validate_inputs_coordinate_arrays,
-                          _validate_inputs_positive_number_non_zero)
+from oasis.common import (_validate_coordinate_array,
+                          _validate_positive_number_non_zero)
 
 
 def relative_coordinates(
@@ -10,7 +10,8 @@ def relative_coordinates(
     boxsize: float,
     periodic: bool = True
 ) -> numpy.ndarray:
-    """Compute positions relative to a reference point, with optional
+    """
+    Compute positions relative to a reference point, with optional
     periodic boundary conditions.
 
     This function calculates the displacement vectors from a reference point
@@ -80,15 +81,13 @@ def relative_coordinates(
      [ 0.4  0.3  0.2]]
     """
     # Input validation and type conversion
-    _validate_inputs_coordinate_arrays(positions, "positions")
-    _validate_inputs_coordinate_arrays(reference, "reference")
+    _validate_coordinate_array(positions, "positions")
+    _validate_coordinate_array(reference, "reference")
+    _validate_positive_number_non_zero(boxsize, "boxsize")
 
     # Ensure positions is 2D array with shape (N, 3)
     if positions.ndim == 1:
         positions = positions.reshape(1, 3)
-
-    # Box size validation
-    _validate_inputs_positive_number_non_zero(boxsize, "box_size")
 
     # Compute displacement vectors
     displacement = positions - reference
@@ -105,7 +104,8 @@ def velocity_components(
     positions: numpy.ndarray,
     velocities: numpy.ndarray
 ) -> tuple[numpy.ndarray, numpy.ndarray, numpy.ndarray]:
-    """Compute radial and tangential velocity components from Cartesian coordinates.
+    """
+    Compute radial and tangential velocity components from Cartesian coordinates.
 
     This function decomposes velocity vectors into radial (along the position
     vector) and tangential (perpendicular to position vector) components.
@@ -182,8 +182,8 @@ def velocity_components(
     Tangential velocities: [0.0 0.0]
     """
     # Input validation and type conversion
-    _validate_inputs_coordinate_arrays(positions, "positions")
-    _validate_inputs_coordinate_arrays(velocities, "velocities")
+    _validate_coordinate_array(positions, "positions")
+    _validate_coordinate_array(velocities, "velocities")
 
     # Ensure positions and velocities are 2D arrays with shape (N, 3)
     if positions.ndim == 1:
@@ -235,6 +235,3 @@ def velocity_components(
         tangential_velocity_squared)
 
     return radial_velocity, tangential_velocity, velocity_squared
-
-
-###
