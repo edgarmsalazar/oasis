@@ -108,6 +108,8 @@ def process_seeds() -> None:
 def process_particles() -> None:
     # Load your data.
     pid, pos, vel = particle_data()
+    # If particles have different masses
+    # pid, pos, vel, particle_mass = particle_data()
 
     # Save particles into miniboxes according to their minibox ID.
     process_simulation_data(
@@ -150,7 +152,6 @@ def calibration() -> None:
         minisize=minisize,
         save_path=save_path,
         particle_type='dm',
-        particle_mass=particle_mass,
         mass_density=mass_density,
         redshift=redshift,
         percent=calib_vrp_percent,
@@ -173,8 +174,8 @@ def run_oasis():
         minisize=minisize,
         run_name=run_name,
         padding=padding,
+        particle_type='dm',
         fast_mass=fast_mass,
-        part_mass=particle_mass,
         n_threads=n_threads,
     )
 
