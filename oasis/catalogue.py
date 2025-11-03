@@ -103,24 +103,40 @@ class MiniBoxClassifier:
         return False
 
     def _compute_deltac(self):
-        """Computes the characteristic density of an NFW profile.
+        """Compute the characteristic density of an NFW profile.
+
+        This method calculates the dimensionless characteristic density (delta_c)
+        for Navarro-Frenk-White (NFW) density profiles based on the concentration
+        parameter c200 = r200/rs. The characteristic density relates to the density
+        normalization of the NFW profile.
 
         Parameters
         ----------
-        r200 : float
-            Halo radius
-        rs : float
-            Scale radius
+        None
+            Uses instance attributes `self.r200b` and `self.rs`.
 
         Returns
         -------
-        float
-            Delta characteristic
+        None
+            Sets `self.deltac` (numpy.ndarray) with the computed characteristic
+            densities for each halo.
 
         Raises
         ------
         ZeroDivisionError
-            If `r200` or `rs` are zero.
+            If any element in `self.r200b` or `self.rs` is zero.
+
+        Notes
+        -----
+        The characteristic density is computed as:
+        
+            delta_c = (200/3) * c^3 / (ln(1+c) - c/(1+c))
+        
+        where c = r200/rs is the concentration parameter.
+
+        See Also
+        --------
+        _rho_nfw_roots : Computes NFW density profile intersections.
         """
         if numpy.any(self.rs == 0.) or numpy.any(self.r200b == 0.):
             raise ZeroDivisionError('Neither r200 nor rs can be zero.')
@@ -137,38 +153,46 @@ class MiniBoxClassifier:
         rs2: float,
         r12: float,
     ):
-        """Returns the value of 
+        """Find the radius where two NFW density profiles are equal.
 
-        \begin{equation*}
-            \frac{\rho_1(R-r)}{\rho_{c}} &= \frac{\rho_2(r)}{\rho_{c}}
-        \end{equation*}
-
-        where $\rho(r)$ is the NFW profile.
-
-        \begin{equation*}
-            \frac{\rho(r)}{\rho_{c}} = 
-                \frac{\delta_c}{\frac{r}{R_s}\left(1+\frac{r}{R_s}\right)^2}
-        \end{equation*}
+        This function computes the difference between two NFW density profiles
+        at a given radius, used to find their intersection point via root-finding.
+        The NFW density profile is given by:
+        
+            rho(r)/rho_c = delta_c / [(r/R_s)(1 + r/R_s)^2]
 
         Parameters
         ----------
         x : float
-            Radial coordinate
+            Radial coordinate at which to evaluate the density difference, 
+            measured from the center of the second object.
         delta1 : float
-            Characteristic density of the central object
+            Characteristic density of the first (central) object.
         rs1 : float
-            Scale radius of the central object
+            Scale radius of the first (central) object.
         delta2 : float
-            Characteristic density of the substructure
+            Characteristic density of the second (substructure) object.
         rs2 : float
-            Scale radius of the substructure
+            Scale radius of the second (substructure) object.
         r12 : float
-            Radial separation between central and substructure R=|x2-x1|.
+            Radial separation between the centers of the two objects.
 
         Returns
         -------
         float
+            Difference between the first and second NFW density profiles at
+            radius x. Returns zero at the intersection point.
 
+        Notes
+        -----
+        The function evaluates rho_1(R-x)/rho_c - rho_2(x)/rho_c, where R is
+        the separation r12. This is designed to be used with scipy.optimize.fsolve
+        to find the radius where the two density profiles intersect.
+
+        See Also
+        --------
+        _apply_6d_ball : Uses this function to define search radii.
+        scipy.optimize.fsolve : Root-finding algorithm typically used with this function.
         """
         x1 = (r12 - x) / rs1
         x2 = x / rs2
@@ -242,31 +266,66 @@ class MiniBoxClassifier:
         max_radius: float = 2.0,
         pivot_radius: float = 0.5
     ) -> numpy.ndarray:
-        """Classifies particles as orbiting.
+        """Classify particles as orbiting or infalling based on kinematics.
+
+        This method uses a phase-space classification scheme that separates
+        orbiting particles from infalling particles based on their positions
+        and velocities relative to a halo center. The classification boundary
+        transitions from linear to quadratic at the pivot radius.
 
         Parameters
         ----------
         rel_pos : numpy.ndarray
-            Relative position of particles around seed
+            Relative positions of particles with respect to the halo center,
+            shape (N, 3). Each row contains (x, y, z) displacement components.
         rel_vel : numpy.ndarray
-            Relative velocity of particles around seed
+            Relative velocities of particles with respect to the halo center,
+            shape (N, 3). Each row contains (vx, vy, vz) velocity components.
         r200 : float
-            Seed R200
+            Virial radius of the halo (R200), defining the boundary where the
+            mean enclosed density is 200 times the critical density.
         m200 : float
-            Seed M200
-        class_pars : Union[List, Tuple, numpy.ndarray]
-            Classification parameters [m_pos, b_pos, m_neg, b_neg]
-        max_radius : float
-            Maximum radius where orbiting particles can be found. All particles 
-            above this value are set to be infalling. By default 2.0.
-        pivot_radius : float
-            Pivot value for the cut transition from linear to quadratic. By default
-            0.5.
+            Virial mass of the halo (M200), the mass enclosed within R200.
+        class_pars : list, tuple, or numpy.ndarray
+            Classification parameters [m_pos, b_pos, m_neg, b_neg, alpha, beta, gamma]
+            defining the orbiting/infalling boundary in phase space. These parameters
+            are typically obtained from calibration procedures.
+        max_radius : float, default=2.0
+            Maximum radius (in units of r200) where orbiting particles can be found.
+            All particles beyond this radius are classified as infalling.
+        pivot_radius : float, default=0.5
+            Transition radius (in units of r200) where the classification boundary
+            changes from linear to quadratic form.
 
         Returns
         -------
         numpy.ndarray
-            A boolean array where True == orbiting
+            Boolean array of shape (N,) where True indicates an orbiting particle
+            and False indicates an infalling particle.
+
+        Notes
+        -----
+        The classification uses normalized coordinates where radii are expressed
+        in units of r200 and velocities squared are in units of v200^2, where
+        v200 = sqrt(G*m200/r200).
+
+        For particles with positive radial velocity (moving outward):
+            Classification uses a linear boundary in (r/r200, ln(v^2/v200^2)) space.
+
+        For particles with negative radial velocity (moving inward):
+            - Below pivot_radius: quadratic boundary
+            - Above pivot_radius: linear boundary
+
+        Examples
+        --------
+        >>> rel_pos = np.array([[0.1, 0.2, 0.3], [0.5, 0.6, 0.7]])
+        >>> rel_vel = np.array([[-1.0, 0.5, 0.2], [0.8, -0.3, 0.1]])
+        >>> r200 = 1.0
+        >>> m200 = 1e12
+        >>> pars = [1.5, 0.2, 1.0, 0.1, 2.0, 1.0, 0.5]
+        >>> mask = MiniBoxClassifier._classify(rel_pos, rel_vel, r200, m200, pars)
+        >>> print(mask)
+        [True False]
         """
         m_pos, b_pos, m_neg, b_neg, alpha, beta, gamma = class_pars
         # Compute V200
@@ -301,8 +360,47 @@ class MiniBoxClassifier:
 
 
     def _classify_particles(self, i: int):
-        """
-        Perform classification for one seed (halo candidate).
+        """Classify particles around a single seed halo candidate.
+
+        This method identifies particles within 2*R200b of a seed and classifies
+        them as either orbiting or infalling using phase-space criteria. Seeds
+        with insufficient orbiting particles are rejected.
+
+        Parameters
+        ----------
+        i : int
+            Index of the seed halo candidate in the internal seed arrays
+            (self.pos_seed, self.vel_seed, etc.).
+
+        Returns
+        -------
+        tuple or None
+            If the seed qualifies as a halo (has at least `self.min_num_part`
+            orbiting particles), returns a tuple containing:
+            
+            - within_r200b : numpy.ndarray
+                Indices of particles within 2*R200b of the seed.
+            - orb_mask : numpy.ndarray
+                Boolean mask indicating which particles in `within_r200b` are
+                classified as orbiting.
+            
+            Returns None if the seed does not meet the minimum particle threshold.
+
+        Notes
+        -----
+        The method performs the following steps:
+        1. Queries the spatial tree for particles within 2*R200b
+        2. Computes relative positions and velocities
+        3. Applies the phase-space classification criterion
+        4. Checks if the number of orbiting particles meets the minimum threshold
+
+        The factor of 2*R200b ensures sufficient volume for detecting orbiting
+        particles while maintaining computational efficiency.
+
+        See Also
+        --------
+        _classify : Core classification algorithm for phase-space cuts.
+        _apply_6d_ball : Subsequent processing step to handle substructures.
         """
         # Select all particles around the seed
         within_r200b = self.position_tree.query_ball_point(self.pos_seed[i], 
@@ -335,8 +433,55 @@ class MiniBoxClassifier:
         within_r200b: numpy.ndarray, 
         orb_mask: numpy.ndarray,
     ):
-        """
-        Apply 6D ball criterion for orbiting structures
+        """Apply 6D phase-space ball criterion to identify orbiting substructures.
+
+        This method identifies nearby less-massive seed halos that are orbiting
+        within the current halo's potential. It uses a 6D ball (3D position + 3D
+        velocity) centered on each nearby seed to determine if it and its particles
+        should be classified as a orbiting.
+
+        Parameters
+        ----------
+        i : int
+            Index of the current seed halo candidate.
+        within_r200b : numpy.ndarray
+            Indices of particles within 2*R200b of the seed (from _classify_particles).
+        orb_mask : numpy.ndarray
+            Boolean mask indicating which particles in `within_r200b` are initially
+            classified as orbiting.
+
+        Returns
+        -------
+        tuple, int, or None
+            - If the seed remains a halo with substructures, returns a tuple:
+            (orb_mask_new, orb_seeds) where orb_mask_new is the updated boolean
+            mask and orb_seeds is a list of halo IDs classified as substructures.
+            - If no nearby seeds are found, returns 0.
+            - If the seed fails to meet minimum particle requirements after
+            processing, returns None.
+
+        Notes
+        -----
+        The 6D ball search radius is defined by:
+        - Spatial radius: minimum of (r_ball, R200b_nearby), where r_ball is the
+        radius where NFW density profiles of the two halos intersect
+        - Velocity radius: v_ball = 2 * sqrt(G*M200b_nearby/R200b_nearby)
+
+        A nearby seed is classified as orbiting if the fraction of orbiting particles
+        within its 6D ball exceeds a threshold:
+        
+            f_threshold = max(0.5, 1 - exp(-(r_ij/R200b_nearby)^2))
+
+        This adaptive threshold increases for more distant seeds to reduce
+        false positives.
+
+        The method updates `self.parent_id_seed` to track which seeds have been
+        identified as substructures.
+
+        See Also
+        --------
+        _rho_nfw_roots : Computes NFW profile intersection radius.
+        _classify_particles : Initial particle classification step.
         """
         # Only work with less massive seeds within a 2*R200b sphere.
         rel_pos = relative_coordinates(self.pos_seed, self.pos_seed[i], 
@@ -425,8 +570,70 @@ class MiniBoxClassifier:
             return None
 
     def _classify_single_seed(self, i: int):
-        """
-        Full classification scheme for a single seed
+        """Execute complete classification scheme for a single seed halo.
+
+        This method orchestrates the full halo identification pipeline for one
+        seed, including particle classification, substructure detection, and
+        catalog entry creation.
+
+        Parameters
+        ----------
+        i : int
+            Index of the seed halo candidate in the internal seed arrays.
+
+        Returns
+        -------
+        dict or None
+            If the seed qualifies as a halo, returns a dictionary containing:
+            
+            - Halo_ID : int
+                Unique halo identifier.
+            - pos : numpy.ndarray
+                3D position of the halo center.
+            - vel : numpy.ndarray
+                3D velocity of the halo center.
+            - R200b : float
+                Virial radius.
+            - M200b : float
+                Virial mass.
+            - Morb : float
+                Total orbiting mass.
+            - Norb : int
+                Number of orbiting particles.
+            - LIDX : int
+                Left index for particles in packed arrays.
+            - RIDX : int
+                Right index for particles in packed arrays.
+            - INMB : bool
+                Whether the halo center is within the current mini-box.
+            - NSUBS : int
+                Number of identified substructures.
+            - PID : int
+                Parent halo ID (-1 if no parent).
+            - SLIDX : int
+                Left index for substructures in packed arrays.
+            - SRIDX : int
+                Right index for substructures in packed arrays.
+            
+            Returns None if the seed fails any classification stage.
+
+        Notes
+        -----
+        The method executes three stages:
+        1. Particle classification (_classify_particles)
+        2. Substructure detection (_apply_6d_ball)
+        3. Catalog entry creation with proper indexing
+
+        The method updates several instance attributes:
+        - self.parent_id_seed: Tracks hierarchical relationships
+        - self.orb_hid, self.orb_pid, self.orb_mass: Accumulate member data
+        - self.n_tot_p, self.n_tot_s: Update global counters for indexing
+
+        See Also
+        --------
+        _classify_particles : First stage of classification.
+        _apply_6d_ball : Second stage identifying substructures.
+        _process_all_seeds : Calls this method for all seeds.
         """
         # Classify particles around the seed
         result_1 = self._classify_particles(i=i)
@@ -488,8 +695,47 @@ class MiniBoxClassifier:
         return row
 
     def _process_all_seeds(self):
-        """
-        Main loop over all seeds in mini-box.
+        """Execute classification pipeline for all seeds in the mini-box.
+
+        This method iterates through all seed halo candidates, applies the
+        complete classification scheme to each, and assembles the results into
+        a catalog sorted by orbiting mass.
+
+        Parameters
+        ----------
+        None
+            Operates on instance attributes initialized during setup.
+
+        Returns
+        -------
+        None
+            Updates instance attributes:
+            
+            - self.haloes : pandas.DataFrame
+                Catalog of identified halos sorted by orbiting mass (descending).
+            - self.orb_pid : numpy.ndarray
+                Concatenated array of particle IDs for all orbiting particles.
+            - self.orb_hid : numpy.ndarray
+                Concatenated array of halo IDs for all identified substructures.
+            - self.orb_mass : numpy.ndarray
+                Concatenated array of particle masses for all orbiting particles.
+
+        Notes
+        -----
+        The method uses a progress bar (tqdm) unless disabled via the
+        `disable_tqdm` parameter during initialization.
+
+        Failed seed classifications (returning None from _classify_single_seed)
+        are silently skipped and do not appear in the final catalog.
+
+        The resulting catalog is sorted by orbiting mass to prioritize more
+        massive halos during the percolation stage, ensuring particles are
+        assigned to their most massive host first.
+
+        See Also
+        --------
+        _classify_single_seed : Classifies individual seeds.
+        _percolation : Subsequent processing to handle particle uniqueness.
         """
         results = []
         for i in tqdm(range(self.n_seeds), ncols=100, desc='Finding haloes',
@@ -514,13 +760,52 @@ class MiniBoxClassifier:
 
     # ==========================================================================
     def _percolation(self):
-        """
-        This pass ensures each particle/seed only counts as orbiting the most
-        massive host it belongs to, and recomputes orbital masses accordingly.
-        Produces:
-            self.haloes_perc, self.orb_pid_perc, self.orb_hid_perc
-        """
+        """Ensure unique particle/substructure assignment to most massive hosts.
 
+        This method implements a percolation algorithm that ensures each particle
+        and substructure is only counted as orbiting the single most massive halo
+        it belongs to. It processes halos in descending mass order, recomputing
+        orbiting masses after particle reassignment.
+
+        Parameters
+        ----------
+        None
+            Operates on instance attributes from _process_all_seeds.
+
+        Returns
+        -------
+        None
+            Creates new instance attributes:
+            
+            - self.haloes_perc : pandas.DataFrame or None
+                Final percolated halo catalog containing only halos within the
+                current mini-box. Returns None if no halos remain after percolation.
+            - self.orb_pid_perc : numpy.ndarray
+                Percolated array of particle IDs with unique assignments.
+            - self.orb_hid_perc : numpy.ndarray
+                Percolated array of substructure halo IDs with unique assignments.
+
+        Notes
+        -----
+        The percolation algorithm:
+        1. Iterates through halos sorted by orbiting mass (descending)
+        2. For each halo, removes particles/substructures already claimed by
+        more massive hosts
+        3. Recomputes orbiting mass with remaining particles
+        4. Discards halos falling below the minimum particle threshold
+        5. Retains only halos with centers inside the mini-box (INMB=True)
+
+        The use of Python sets for tracking seen particles provides O(1) lookup
+        performance, significantly improving efficiency over array-based approaches.
+
+        This step is critical for avoiding double-counting in overlapping halo
+        regions and ensuring mass conservation across the catalog.
+
+        See Also
+        --------
+        _process_all_seeds : Generates the initial halo catalog.
+        _save_catalogues : Saves the percolated catalog to disk.
+        """
         orb_pid_perc = []
         orb_hid_perc = []
         n_tot_perc = 0
@@ -596,8 +881,51 @@ class MiniBoxClassifier:
 
     # ==========================================================================
     def _save_catalogues(self):
-        """
-        Writes halo and member catalogues to an HDF5 file in `self.save_path`.
+        """Write percolated halo and member catalogs to HDF5 file.
+
+        This method saves the final halo catalog and associated particle/substructure
+        membership data to a single HDF5 file in the mini-box output directory.
+
+        Parameters
+        ----------
+        None
+            Saves data from instance attributes created during percolation.
+
+        Returns
+        -------
+        None
+            Writes HDF5 file to disk at:
+            {self.save_path}/{self.mini_box_id}.hdf5
+
+        Notes
+        -----
+        The HDF5 file structure contains two main groups:
+
+        /halo/ group:
+            - Halo_ID, pos, vel, R200b, M200b, Morb, Norb, LIDX, RIDX, NSUBS,
+            PID, SLIDX, SRIDX
+            - Data types are optimized (e.g., uint32 for indices, float32 for
+            physical quantities)
+            - The INMB column is excluded as all halos satisfy this criterion
+            after percolation
+
+        /memb/ group:
+            - PID: Particle IDs of all orbiting particles
+            - Halo_ID: Halo IDs of all orbiting substructures
+
+        Array indices (LIDX, RIDX, SLIDX, SRIDX) in the halo catalog provide
+        efficient slicing into the packed member arrays without storing redundant
+        halo associations for each particle/substructure.
+
+        Raises
+        ------
+        IOError
+            If the output directory is not writable or disk space is insufficient.
+
+        See Also
+        --------
+        _percolation : Creates the data structures saved by this method.
+        merge_catalogues : Combines individual mini-box catalogs.
         """
 
         full_path = self.save_path + f"{self.mini_box_id}.hdf5"
@@ -626,7 +954,60 @@ class MiniBoxClassifier:
                                dtype=self.orb_hid_perc[0].dtype)
 
     def run(self):
-        """Main loop"""
+        """Execute the complete halo finding pipeline for this mini-box.
+
+        This is the main entry point that orchestrates all stages of halo
+        identification, from data loading through classification to catalog output.
+
+        Parameters
+        ----------
+        None
+            Uses parameters provided during class initialization.
+
+        Returns
+        -------
+        None
+            Produces side effects:
+            - Creates output directory structure
+            - Writes HDF5 catalog file to disk
+            - Modifies instance attributes throughout execution
+
+        Notes
+        -----
+        The pipeline executes the following stages in order:
+        
+        1. Setup: Create output directories
+        2. Load seeds and apply mass filtering
+        3. Early exit if no seeds present
+        4. Compute NFW characteristic densities
+        5. Load particle data and build spatial tree
+        6. Load calibration parameters
+        7. Initialize catalog data structures
+        8. Process all seeds (particle classification + substructure detection)
+        9. Percolation (unique particle assignment)
+        10. Save catalogs to disk
+
+        The method returns immediately (without error) if no valid seeds are
+        present in the mini-box, producing no output files.
+
+        Examples
+        --------
+        >>> classifier = MiniBoxClassifier(
+        ...     mini_box_id=0,
+        ...     min_num_part=20,
+        ...     boxsize=100.0,
+        ...     minisize=25.0,
+        ...     load_path="/data/sim/",
+        ...     run_name="test_run",
+        ...     particle_type="dm"
+        ... )
+        >>> classifier.run()
+
+        See Also
+        --------
+        process_minibox : Wrapper function for parallel processing.
+        process_all_miniboxes : Orchestrates processing across all mini-boxes.
+        """
         self._make_output_dir()
         self._load_seeds_and_filter()
 
@@ -645,7 +1026,54 @@ class MiniBoxClassifier:
 
 
 def process_minibox(i, **kwargs):
-    """Calls mini-box classifier for parallel computing"""
+    """Wrapper function for parallel halo finding in a single mini-box.
+
+    This function creates a MiniBoxClassifier instance and executes the
+    complete halo finding pipeline. It is designed as a lightweight wrapper
+    for use with multiprocessing.Pool.
+
+    Parameters
+    ----------
+    i : int
+        Mini-box identifier (0-based index).
+    **kwargs : dict
+        Keyword arguments forwarded to MiniBoxClassifier constructor.
+        Required keys: min_num_part, boxsize, minisize, load_path, run_name,
+        particle_type. Optional keys: padding, fast_mass, disable_tqdm.
+
+    Returns
+    -------
+    None
+        Produces side effects via MiniBoxClassifier.run(), writing catalog
+        files to disk.
+
+    Notes
+    -----
+    This function is intentionally minimal to reduce pickling overhead when
+    used with multiprocessing. All configuration is passed through kwargs
+    rather than using closures or partial application.
+
+    Examples
+    --------
+    >>> from multiprocessing import Pool
+    >>> from functools import partial
+    >>> 
+    >>> params = {
+    ...     'min_num_part': 20,
+    ...     'boxsize': 100.0,
+    ...     'minisize': 25.0,
+    ...     'load_path': '/data/sim/',
+    ...     'run_name': 'test_run',
+    ...     'particle_type': 'dm'
+    ... }
+    >>> with Pool(4) as pool:
+    ...     pool.map(partial(process_minibox, **params), range(64))
+
+    See Also
+    --------
+    MiniBoxClassifier : The class that performs the actual halo finding.
+    process_all_miniboxes : Higher-level function that manages parallelization.
+    """
     classifier = MiniBoxClassifier(mini_box_id=i, **kwargs)
     classifier.run()
     return
@@ -662,6 +1090,79 @@ def process_all_miniboxes(
     fast_mass: bool = False,
     n_threads: int = None,
 ) -> None:
+    """Process all mini-boxes in parallel to generate individual halo catalogs.
+
+    This function divides the simulation volume into mini-boxes and processes
+    each in parallel using multiprocessing. It automatically handles thread
+    management and falls back to sequential processing if parallel execution
+    fails.
+
+    Parameters
+    ----------
+    load_path : str
+        Base directory containing simulation data. Must end with '/'.
+    run_name : str
+        Identifier for this run. Creates output directory 'run_{run_name}/'.
+    min_num_part : int
+        Minimum number of orbiting particles required to classify a seed
+        as a halo.
+    boxsize : float
+        Total size of the cubic simulation volume.
+    minisize : float
+        Size of each cubic mini-box subdivision. Should evenly divide boxsize
+        for optimal performance.
+    padding : float
+        Buffer distance beyond mini-box edges for particle loading. Ensures
+        halos near boundaries are properly captured.
+    particle_type : str
+        Type of particles to load (e.g., 'dm' for dark matter, 'gas').
+    fast_mass : bool, default=False
+        If True, apply additional mass-based filtering to seeds before
+        classification to improve performance.
+    n_threads : int, optional
+        Number of parallel workers. If None, uses half of available CPU cores,
+        capped at the number of mini-boxes.
+
+    Returns
+    -------
+    None
+        Produces side effects:
+        - Creates output directory structure
+        - Writes individual HDF5 catalog files for each mini-box
+        - Displays progress bars during execution
+
+    Notes
+    -----
+    The function automatically computes the number of mini-boxes as
+    ceil(boxsize/minisize)^3.
+
+    Thread management:
+    - Default: min(cpu_count/2, n_mini_boxes)
+    - Capped at total number of mini-boxes to avoid idle workers
+    - Falls back to sequential processing if multiprocessing fails
+
+    Each mini-box produces an independent catalog file that must be merged
+    using merge_catalogues() to create the final unified catalog.
+
+    Examples
+    --------
+    >>> process_all_miniboxes(
+    ...     load_path='/data/simulation/',
+    ...     run_name='production_v1',
+    ...     min_num_part=20,
+    ...     boxsize=100.0,
+    ...     minisize=25.0,
+    ...     padding=5.0,
+    ...     particle_type='dm',
+    ...     n_threads=8
+    ... )
+
+    See Also
+    --------
+    process_minibox : Processes individual mini-boxes.
+    merge_catalogues : Combines individual catalogs into final output.
+    MiniBoxClassifier : Core classification algorithm.
+    """
     # Create directory if it does not exist
     save_path = load_path + f'run_{run_name}/mini_box_catalogues/'
     ensure_dir_exists(save_path)
@@ -716,6 +1217,71 @@ def merge_catalogues(
     run_name: str,
     n_mini_boxes: int,
 ) -> None:
+    """Merge individual mini-box catalogs into unified halo and member files.
+
+    This function combines the HDF5 catalog files produced by individual
+    mini-box processing into two final output files: a complete halo catalog
+    and a member (particle/substructure) catalog with properly offset indices.
+
+    Parameters
+    ----------
+    load_path : str
+        Base directory containing simulation data and mini-box catalogs.
+        Must match the path used in process_all_miniboxes.
+    run_name : str
+        Run identifier used to locate mini-box catalog directory and
+        name output files.
+    n_mini_boxes : int
+        Total number of mini-box catalog files to merge. Typically
+        computed as ceil(boxsize/minisize)^3.
+
+    Returns
+    -------
+    None
+        Produces two HDF5 files:
+        - {load_path}/run_{run_name}/catalogue.hdf5: Combined halo properties
+        - {load_path}/run_{run_name}/members.hdf5: Combined particle/substructure IDs
+
+    Raises
+    ------
+    FileNotFoundError
+        If no mini-box catalog files are found in the expected directory.
+
+    Notes
+    -----
+    Output file structure:
+
+    catalogue.hdf5:
+        - Halo_ID, pos, vel, R200b, M200b, Morb, Norb, LIDX, RIDX, NSUBS,
+          PID, SLIDX, SRIDX
+        - Indices (LIDX, RIDX, SLIDX, SRIDX) are offset to account for
+          concatenation across mini-boxes
+        - Halos without substructures have SLIDX=SRIDX=-1
+
+    members.hdf5:
+        - PID: Concatenated particle IDs for all orbiting particles
+        - Halo_ID: Concatenated halo IDs for all orbiting substructures
+
+    The function uses chunked, resizable HDF5 datasets to efficiently handle
+    large catalogs without excessive memory consumption.
+
+    Missing mini-box files (from boxes with no halos) are automatically
+    skipped without error.
+
+    Examples
+    --------
+    >>> n_boxes = int(np.ceil(100.0 / 25.0))**3  # 64 mini-boxes
+    >>> merge_catalogues(
+    ...     load_path='/data/simulation/',
+    ...     run_name='production_v1',
+    ...     n_mini_boxes=n_boxes
+    ... )
+
+    See Also
+    --------
+    process_all_miniboxes : Generates the mini-box catalogs to be merged.
+    run_orbiting_mass_assignment : High-level function that calls both.
+    """
     save_path = load_path + f'run_{run_name}/mini_box_catalogues/'
 
     # Find dataset keys from file
@@ -821,32 +1387,109 @@ def run_orbiting_mass_assignment(
     n_threads: int = None,
     cleanup: bool = False,
 ) -> None:
-    """Generates a halo catalogue using the kinetic mass criterion to classify
-    particles into orbiting or infalling.
+    """Generate complete halo catalog using kinetic energy classification.
+
+    This is the main entry point for the halo finding pipeline. It orchestrates
+    mini-box processing, catalog merging, and optional cleanup of intermediate
+    files to produce a final unified halo catalog with particle membership.
 
     Parameters
     ----------
     load_path : str
-        Location from where to load the file
-    min_num_part : int
-        Minimum number of particles needed to be considered a halo
-    boxsize : float
-        Size of simulation box
-    minisize : float
-        Size of mini box
+        Base directory containing simulation data. Must contain:
+        - Seed files (halo candidates)
+        - Particle data files
+        - calibration_pars.hdf5 (classification parameters)
     run_name : str
-        Label for the current run. The directory created will be `run_<run_name>`
-    padding : float, optional
-        Only particles up to this distance from the mini box edge are considered 
-        for classification. Defaults to 5
-    n_threads : int
-        Number of threads, by default None
-    cleanup : bool
-        Removes individual minibox catalogues after contatenation.
+        Unique identifier for this run. Creates directory structure:
+        run_{run_name}/mini_box_catalogues/ (temporary, optional)
+        run_{run_name}/catalogue.hdf5 (final output)
+        run_{run_name}/members.hdf5 (final output)
+    min_num_part : int
+        Minimum number of orbiting particles required to classify a structure
+        as a halo. Typical values: 20-100 depending on resolution.
+    boxsize : float
+        Size of the cubic simulation volume in simulation units (e.g., Mpc/h).
+    minisize : float
+        Size of cubic mini-box subdivisions. Smaller values increase
+        parallelism but add overhead. Recommended: boxsize/4 to boxsize/8.
+    padding : float
+        Buffer distance for particle loading beyond mini-box boundaries.
+        Should be at least ~5 Mpc/h to capture halo outskirts properly.
+    particle_type : str
+        Type of particles to process. Common values: 'dm' (dark matter),
+        'gas', 'stars'.
+    fast_mass : bool, default=False
+        Enable aggressive mass-based filtering of seed candidates to improve
+        performance. May miss low-mass halos near the resolution limit.
+    n_threads : int, optional
+        Number of parallel workers for mini-box processing. If None,
+        automatically determined as min(cpu_count/2, n_mini_boxes).
+    cleanup : bool, default=False
+        If True, delete individual mini-box catalog files after merging to
+        save disk space. Final catalogs are retained.
 
     Returns
     -------
     None
+        Produces side effects:
+        - Creates run_{run_name}/ directory structure
+        - Writes catalogue.hdf5 and members.hdf5 in run_{run_name}/
+        - Optionally removes temporary mini-box catalogs
+
+    Notes
+    -----
+    The kinetic mass criterion classifies particles as orbiting or infalling
+    based on their phase-space coordinates (position and velocity) relative
+    to halo centers. This approach provides more accurate mass estimates than
+    spherical overdensity methods in dynamically active environments.
+
+    Processing pipeline:
+    1. Divide volume into mini-boxes (automatically determined)
+    2. Process each mini-box in parallel:
+       - Load seeds and particles
+       - Classify particles using phase-space cuts
+       - Identify substructures with 6D ball criterion
+       - Percolate to ensure unique particle assignment
+    3. Merge mini-box catalogs into unified outputs
+    4. Optionally clean up intermediate files
+
+    The final catalogue.hdf5 contains halo properties while members.hdf5
+    contains particle/substructure IDs. Use the index columns (LIDX, RIDX,
+    SLIDX, SRIDX) to slice the member arrays for each halo.
+
+    Examples
+    --------
+    Basic usage:
+    >>> run_orbiting_mass_assignment(
+    ...     load_path='/data/simulations/cosmo_box/',
+    ...     run_name='z0_halos',
+    ...     min_num_part=20,
+    ...     boxsize=100.0,
+    ...     minisize=25.0,
+    ...     padding=5.0,
+    ...     particle_type='dm'
+    ... )
+
+    High-performance run with cleanup:
+    >>> run_orbiting_mass_assignment(
+    ...     load_path='/data/simulations/high_res/',
+    ...     run_name='production_run',
+    ...     min_num_part=50,
+    ...     boxsize=200.0,
+    ...     minisize=25.0,
+    ...     padding=5.0,
+    ...     particle_type='dm',
+    ...     fast_mass=True,
+    ...     n_threads=16,
+    ...     cleanup=True
+    ... )
+
+    See Also
+    --------
+    process_all_miniboxes : Handles parallel mini-box processing.
+    merge_catalogues : Combines individual catalogs.
+    MiniBoxClassifier : Core classification algorithm and data structure.
     """
     process_all_miniboxes(
         load_path=load_path,
