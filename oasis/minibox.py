@@ -381,6 +381,7 @@ def split_simulation_into_mini_boxes(
     # Group by mini-box ID (linear time)
     with TimerContext("Sorting by mini-box ID", fancy=False):
         unique_ids, inverse = numpy.unique(mini_box_ids, return_inverse=True)
+    n_mini_box_ids = len(unique_ids)
 
     if props:
         data_arrays, data_labels, data_dtypes = props
@@ -420,8 +421,8 @@ def split_simulation_into_mini_boxes(
     if n_threads > 1:
         try:
             with ThreadPool(n_threads) as pool:
-                list(tqdm(pool.imap_unordered(write_mini_box, range(n_chunks)),
-                  total=n_chunks, desc='Saving mini-boxes', ncols=100, colour='green'))
+                list(tqdm(pool.imap_unordered(write_mini_box, range(n_mini_box_ids)),
+                  total=n_mini_box_ids, desc='Saving mini-boxes', ncols=100, colour='green'))
         except Exception as e:
             print(
                 f"Warning: Parallel processing failed ({e}), falling back to sequential")
@@ -429,7 +430,7 @@ def split_simulation_into_mini_boxes(
             n_threads = 1
 
     if n_threads == 1:
-        for i in tqdm(range(n_chunks), desc='Saving mini-boxes', ncols=100, 
+        for i in tqdm(range(n_mini_box_ids), desc='Saving mini-boxes', ncols=100, 
                       colour='blue'):
             write_mini_box(i)
 
@@ -832,8 +833,10 @@ def load_seeds(
     
     # Load all adjacent boxes
     for i, mini_box in enumerate(mini_box_ids):
-        file_name = f'mini_boxes_nside_{cells_per_side}/{mini_box}.hdf5'
-        with h5py.File(load_path + file_name, 'r') as hdf:
+        file_name = load_path + f'mini_boxes_nside_{cells_per_side}/{mini_box}.hdf5'
+        # if not os.path.exists(file_name):
+        #     continue
+        with h5py.File(file_name, 'r') as hdf:
             positions.append(hdf['seed/pos'][()])
             velocities.append(hdf['seed/vel'][()])
             ids.append(hdf['seed/ID'][()])
