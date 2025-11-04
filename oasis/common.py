@@ -155,7 +155,7 @@ class TimerContext:
             print(f"{self.name} completed in...")
         return self
 
-    def __exit__(self):
+    def __exit__(self, exc_type, exc_val, exc_tb):
         self.elapsed = perf_counter() - self.start_time
         
         hours = int(self.elapsed // 3600)
