@@ -152,7 +152,7 @@ class TimerContext:
                 f"{self.name}... {AnsiColor.ENDC}"
             )
         else:
-            print(f"{self.name} completed in...")
+            print(f"{self.name}...")
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
