@@ -953,8 +953,9 @@ class MiniBoxClassifier:
                                 dtype=self.orb_pid_perc[0].dtype)
 
             # Seeds
-            hdf.create_dataset('memb/Halo_ID', data=self.orb_hid_perc,
-                               dtype=self.orb_hid_perc[0].dtype)
+            if len(self.orb_hid_perc) > 0:
+                hdf.create_dataset('memb/Halo_ID', data=self.orb_hid_perc,
+                                dtype=self.orb_hid_perc[0].dtype)
 
     def run(self):
         """Execute the complete halo finding pipeline for this mini-box.
@@ -1208,11 +1209,10 @@ def process_all_miniboxes(
                     desc='Generating halo catalogue') as pbar:
                 for _ in pool.imap(func, range(n_mini_boxes)):
                     pbar.update()
-        except Exception as e:
-            print(f"Warning: Parallel processing failed ({e}), falling back to"
-                  " sequential")
+        except RuntimeError as e:
             # Fall back to sequential processing
             n_threads = 1
+            raise RuntimeError(e)
     
     if n_threads == 1:
         for box_i in tqdm(range(n_mini_boxes), colour="green", ncols=100,
@@ -1326,7 +1326,11 @@ def merge_catalogues(
             # Member data ======================================================
             # Number of particles in current file
             n_part_this = hdf_load['memb/PID'].shape[0]
-            n_seed_this = hdf_load['memb/Halo_ID'].shape[0]
+            # Number of subhalos in current file
+            n_seed_this = 0
+            has_sub_halos = 'Halo_ID' in hdf_load['memb'].keys()
+            if has_sub_halos:
+                n_seed_this = hdf_load['memb/Halo_ID'].shape[0]
 
             # This reshaping of the dataset after every new file...
             if first_file:  # Create the dataset at first pass.
@@ -1345,11 +1349,12 @@ def merge_catalogues(
                 hdf_memb['PID'][n_part:] = hdf_load['memb/PID'][()]
 
                 # Number of seeds so far plus this file's total.
-                new_shape = n_seed + n_seed_this
-                # Resize axes and save incoming data
-                hdf_memb['Halo_ID'].resize((new_shape), axis=0)
-                hdf_memb['Halo_ID'][n_seed:] = \
-                    hdf_load['memb/Halo_ID'][()]
+                if has_sub_halos:
+                    new_shape = n_seed + n_seed_this
+                    # Resize axes and save incoming data
+                    hdf_memb['Halo_ID'].resize((new_shape), axis=0)
+                    hdf_memb['Halo_ID'][n_seed:] = \
+                        hdf_load['memb/Halo_ID'][()]
 
             # Halo data ========================================================
             for key in halo_keys:
