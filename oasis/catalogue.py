@@ -32,7 +32,7 @@ class MiniBoxClassifier:
         load_path: str,
         run_name: str,
         particle_type: str,
-        seed_prop_names: tuple[str] = ('M200b', 'R200b', 'Rs'),
+        seed_prop_names: tuple[str],
         padding: float = 5.0,
         fast_mass: bool = False,
         disable_tqdm: bool = True,
@@ -1090,7 +1090,7 @@ def process_all_miniboxes(
     minisize: float,
     padding: float,
     particle_type: str,
-    seed_prop_names: tuple[str] = ('M200b', 'R200b', 'Rs'),
+    seed_prop_names: tuple[str],
     fast_mass: bool = False,
     n_threads: int = None,
 ) -> None:
