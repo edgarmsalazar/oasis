@@ -32,6 +32,7 @@ class MiniBoxClassifier:
         load_path: str,
         run_name: str,
         particle_type: str,
+        seed_prop_names: tuple[str] = ('M200b', 'R200b', 'Rs'),
         padding: float = 5.0,
         fast_mass: bool = False,
         disable_tqdm: bool = True,
@@ -45,6 +46,7 @@ class MiniBoxClassifier:
         self.run_name = run_name
         self.particle_type = particle_type
         self.padding = padding
+        self.seed_prop_names = seed_prop_names
         self.fast_mass = fast_mass
         self.disable_tqdm = disable_tqdm
 
@@ -81,6 +83,7 @@ class MiniBoxClassifier:
             self.boxsize,
             self.minisize,
             self.load_path,
+            self.seed_prop_names,
             self.padding,
         )
 
@@ -1087,6 +1090,7 @@ def process_all_miniboxes(
     minisize: float,
     padding: float,
     particle_type: str,
+    seed_prop_names: tuple[str] = ('M200b', 'R200b', 'Rs'),
     fast_mass: bool = False,
     n_threads: int = None,
 ) -> None:
@@ -1116,6 +1120,10 @@ def process_all_miniboxes(
         halos near boundaries are properly captured.
     particle_type : str
         Type of particles to load (e.g., 'dm' for dark matter, 'gas').
+    seed_prop_names : Tuple[str], optional
+        Tuple with three strings: mass, radius, and scale radius label names in 
+        the mini-box HDF5 files, in case other names (e.g. Mvir, Rvir) were used. 
+        Default is ('M200b', 'R200b', 'Rs').
     fast_mass : bool, default=False
         If True, apply additional mass-based filtering to seeds before
         classification to improve performance.
@@ -1154,6 +1162,7 @@ def process_all_miniboxes(
     ...     minisize=25.0,
     ...     padding=5.0,
     ...     particle_type='dm',
+    ...     seed_prop_names=('mvir', 'rvir', 'rs')
     ...     n_threads=8
     ... )
 
@@ -1185,6 +1194,7 @@ def process_all_miniboxes(
         load_path=load_path,
         run_name=run_name, 
         particle_type=particle_type, 
+        seed_prop_names=seed_prop_names,
         padding=padding, 
         fast_mass=fast_mass, 
         disable_tqdm=True,
@@ -1383,6 +1393,7 @@ def run_orbiting_mass_assignment(
     minisize: float,
     padding: float,
     particle_type: str,
+    seed_prop_names: tuple[str] = ('M200b', 'R200b', 'Rs'),
     fast_mass: bool = False,
     n_threads: int = None,
     cleanup: bool = False,
@@ -1419,6 +1430,10 @@ def run_orbiting_mass_assignment(
     particle_type : str
         Type of particles to process. Common values: 'dm' (dark matter),
         'gas', 'stars'.
+    seed_prop_names : Tuple[str], optional
+        Tuple with three strings: mass, radius, and scale radius label names in 
+        the mini-box HDF5 files, in case other names (e.g. Mvir, Rvir) were used. 
+        Default is ('M200b', 'R200b', 'Rs').
     fast_mass : bool, default=False
         Enable aggressive mass-based filtering of seed candidates to improve
         performance. May miss low-mass halos near the resolution limit.
@@ -1481,6 +1496,7 @@ def run_orbiting_mass_assignment(
     ...     padding=5.0,
     ...     particle_type='dm',
     ...     fast_mass=True,
+    ...     seed_prop_names=('mvir', 'rvir', 'rs')
     ...     n_threads=16,
     ...     cleanup=True
     ... )
@@ -1499,6 +1515,7 @@ def run_orbiting_mass_assignment(
         minisize=minisize,
         padding=padding,
         particle_type=particle_type,
+        seed_prop_names=seed_prop_names,
         fast_mass=fast_mass,
         n_threads=n_threads,
     )

@@ -707,6 +707,7 @@ def load_seeds(
     boxsize: float,
     minisize: float,
     load_path: str,
+    seed_prop_names: Tuple[str] = ('M200b', 'R200b', 'Rs'),
     padding: float = 5.0,
 ) -> Tuple[numpy.ndarray]:
     """
@@ -736,6 +737,10 @@ def load_seeds(
         Path to directory containing the mini-box HDF5 files. The directory
         should contain a subdirectory named 'mini_boxes_nside_<xx>/' where <xx>
         is the number of cells per side.
+    seed_prop_names : Tuple[str], optional
+        Tuple with three strings: mass, radius, and scale radius label names in 
+        the mini-box HDF5 files, in case other names (e.g. Mvir, Rvir) were used. 
+        Default is ('M200b', 'R200b', 'Rs').
     padding : float, optional
         Maximum distance from mini-box edges to include seeds. Seeds further 
         than this distance from any edge of the target mini-box will be 
@@ -802,12 +807,14 @@ def load_seeds(
     ...     boxsize=100.0,
     ...     minisize=10.0,
     ...     load_path="/data/simulation/",
+    ...     seed_prop_names=('mvir', 'rvir', 'rs')
     ...     padding=2.0
     ... )
     >>> print(f"Loaded {mask.sum()} seeds from mini-box")
     """
     # Input validation
     _validate_inputs_load(mini_box_id, boxsize, minisize, load_path, padding)
+    label_m200, label_r200, label_rs = seed_prop_names
 
     # Get the adjacent mini-box IDs
     mini_box_ids = get_adjacent_mini_box_ids(
@@ -822,7 +829,7 @@ def load_seeds(
     # Create empty lists (containers) to save the data from file for each ID
     positions, velocities, ids, r200, m200, rs, mini_box_mask = (
         [] for _ in range(7))
-
+    
     # Load all adjacent boxes
     for i, mini_box in enumerate(mini_box_ids):
         file_name = f'mini_boxes_nside_{cells_per_side}/{mini_box}.hdf5'
@@ -830,9 +837,9 @@ def load_seeds(
             positions.append(hdf['seed/pos'][()])
             velocities.append(hdf['seed/vel'][()])
             ids.append(hdf['seed/ID'][()])
-            r200.append(hdf['seed/R200b'][()])
-            m200.append(hdf['seed/M200b'][()])
-            rs.append(hdf['seed/Rs'][()])
+            r200.append(hdf[f'seed/{label_r200}'][()])
+            m200.append(hdf[f'seed/{label_m200}'][()])
+            rs.append(hdf[f'seed/{label_rs}'][()])
             n_seeds = len(hdf['seed/ID'][()])
             if mini_box == mini_box_id:
                 mini_box_mask.append(numpy.ones(n_seeds, dtype=bool))
