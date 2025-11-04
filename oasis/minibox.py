@@ -379,7 +379,7 @@ def split_simulation_into_mini_boxes(
             mini_box_ids[low:upp] = get_mini_box_id(positions[low:upp], boxsize, minisize)
     
     # Group by mini-box ID (linear time)
-    with TimerContext("Sorting by mini-box ID"):
+    with TimerContext("Sorting by mini-box ID", fancy=False):
         unique_ids, inverse = numpy.unique(mini_box_ids, return_inverse=True)
 
     if props:
