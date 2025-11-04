@@ -51,6 +51,7 @@ calib_vrp_percent: float = 0.995
 calib_vrn_width: float = 0.050
 calib_gradient_radial_limits: tuple[float] = (0.2, 0.5)
 n_threads: int = 50
+diagnostic_plots = True
 
 # Catalogue.
 n_orb_min: int = 200
@@ -158,6 +159,7 @@ def calibration() -> None:
         width=calib_vrn_width,
         gradient_radial_lims=calib_gradient_radial_limits,
         n_threads=n_threads,
+        diagnostic_plots=diagnostic_plots,
         overwrite=False,
     )
 
@@ -177,6 +179,7 @@ def run_oasis():
         particle_type='dm',
         fast_mass=fast_mass,
         n_threads=n_threads,
+        cleanup=True,
     )
 
     return
@@ -196,5 +199,3 @@ def main():
 if __name__ == '__main__':
     ensure_dir_exists(save_path)
     main()
-
-#####
