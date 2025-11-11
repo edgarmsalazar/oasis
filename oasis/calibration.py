@@ -933,7 +933,6 @@ def get_calibration_data(
     minisize: float,
     save_path: str,
     particle_type: str,
-    # particle_mass: float,
     mass_density: float,
     redshift: float,
     isolation_factor: float = 0.2,
@@ -1106,7 +1105,6 @@ def get_calibration_data(
             minisize=minisize,
             load_path=save_path,
             particle_type=particle_type,
-            # particle_mass=particle_mass,
             mass_density=mass_density,
             isolation_factor=isolation_factor,
             isolation_radius_factor=isolation_radius_factor,
@@ -1325,101 +1323,6 @@ def _cost_perpendicular_distance_abscissa(abscissa: float, *data) -> float:
     cost = -numpy.log(numpy.mean(distance_within_band ** 2))
     return cost
     
-
-def _cost_perpendicular_distance_slope(slope: float, *data) -> float:
-    """
-    Compute cost for fitting line slope to maximize perpendicular distances.
-
-    This cost function optimizes the slope of a line with fixed y-intercept
-    (at a pivot radius) to maximize the mean squared perpendicular distance
-    of points within a specified band around the line.
-
-    Parameters
-    ----------
-    slope : float
-        Slope of the line in (ln(v^2), r/R200m) space. Represents the rate of
-        change of ln(v^2/V200m^2) with respect to r/R200m.
-        (constant velocity).
-    *data : tuple
-        Variable-length argument tuple containing exactly 5 elements:
-        - radius : numpy.ndarray with shape (n_particles,)
-            Scaled radial distances (r/R200m) for all particles.
-        - log_velocity_squared : numpy.ndarray with shape (n_particles,)
-            Natural log of velocity squared scaled by V200m^2 (ln(v^2/V200m^2)).
-        - abscissa : float
-            Fixed y-intercept of the line at the pivot radius (radius_pivot).
-            Represents ln(v^2/V200m^2) at radius_pivot.
-        - width : float
-            Half-width of band around the line in same units as 
-            log_velocity_squared. Only points within this perpendicular
-            distance contribute to the cost. Must be positive.
-        - radius_pivot : float
-            Pivot radius where the line has value abscissa. Typically chosen 
-            at 0.5*R200m for numerical stability.
-
-    Returns
-    -------
-    cost : float
-        Negative logarithm of mean squared perpendicular distance for points
-        within the band. Returns -ln(mean(distance^2)). More negative values
-        indicate better fits (larger mean distances to maximize).
-
-    Raises
-    ------
-    ValueError
-        If data tuple doesn't contain exactly 5 elements, if arrays have
-        incompatible shapes, or if no points fall within the band.
-    TypeError
-        If inputs cannot be converted to appropriate numeric types.
-
-    See Also
-    --------
-    scipy.optimize.minimize : Optimization routine for this cost function
-    _cost_perpendicular_distance_abscissa : Optimize intercept with fixed slope
-    _cost_percentile : Alternative cost based on percentiles
-
-    Notes
-    -----
-    - Line equation: y = slope * (radius - radius_pivot) + abscissa
-    - Perpendicular distance: d = |y - line| / \sqrt(1 + slope^2)
-    - Only points with d < width contribute to cost
-    - Cost is negated because we maximize distance but minimize cost
-    - The denominator \sqrt(1 + slope^2) ensures true perpendicular distance
-    - For very steep slopes, optimization may become numerically unstable
-
-    Examples
-    --------
-    >>> import numpy as np
-    >>> from scipy.optimize import minimize
-    >>> 
-    >>> # Generate data along a sloped line with scatter
-    >>> radius = np.random.uniform(0.1, 2.0, 2000)
-    >>> true_slope = 0.4
-    >>> log_v2 = true_slope * (radius - 1.0) + 0.3 + np.random.normal(0, 0.15, 2000)
-    >>> 
-    >>> # Find slope that maximizes distances within band
-    >>> data = (radius, log_v2, 0.3, 0.4, 1.0)
-    >>> result = minimize(_cost_perpendicular_distance_slope,
-    ...                          args=data, method='brent',
-    ...                          bounds=(-1.0, 1.0))
-    >>> optimal_slope = result.x
-    >>> print(f"True slope: {true_slope:.3f}")
-    >>> print(f"Fitted slope: {optimal_slope:.3f}")
-    """
-    radius, log_velocity_squared, abscissa, width, radius_pivot = data
-    line = slope * (radius - radius_pivot) + abscissa
-
-    # Perpendicular distance to the line
-    distance = numpy.abs(log_velocity_squared - line) / \
-        numpy.sqrt(1 + slope**2)
-
-    # Select only elements within the width of the band
-    distance_within_band = distance[(distance < width)]
-
-    # Cost to maximize (thus negative)
-    cost = -numpy.log(numpy.mean(distance_within_band ** 2))
-    return cost
-
 
 def _diagnostic_gradient_minima_plot(
     save_path:  str,
@@ -2481,7 +2384,6 @@ def self_calibration(
     4. For negative radial velocity:
        - Compute gradient minima similarly
        - Optimize intercept to maximize perpendicular distances
-       - Refine slope with fixed intercept
        - Compute low-radius quadratic correction
     5. Save all parameters to HDF5 file
     
@@ -2642,12 +2544,14 @@ def self_calibration(
     median_abs_dev = 1.4286 * numpy.median(abs_dev)
     mask_outliers = abs_dev <= 3. * median_abs_dev
 
-    # Find slope by fitting to the minima.
-    (slope_n, abscissa_n), _ = curve_fit(line_model, 
-                                         radial_bins_negative[mask_outliers],
-                                         gradient_minumum_negative[mask_outliers],
-                                         p0=[-1, 2], bounds=((-5, 0), (0, 3)))
-    
+    # Find abscissa initial guess by fitting to the minima.
+    (_, abscissa_n), _ = curve_fit(line_model, 
+                                   radial_bins_negative[mask_outliers],
+                                   gradient_minumum_negative[mask_outliers],
+                                   p0=[-1, 2], bounds=((-5, 0), (0, 3)))
+    # Fix slope to the positive radial velocity value
+    slope_negative_vr = slope_positive_vr
+
     # The user input width is scaled with redshift such that it is double at 
     # z = 3. This was needed due to the numerical noise in the cost function 
     # when using small band widths. Has not been tested beyond this redshift.
@@ -2662,22 +2566,10 @@ def self_calibration(
         bounds=((0., abscissa_n),),
         args=(radius[mask_negative_vr & mask_low_radius], 
               log_velocity_squared[mask_negative_vr & mask_low_radius],
-              slope_n, width, radius_pivot),
+              slope_negative_vr, width, radius_pivot),
         method='Nelder-Mead',
     )
     abscissa_negative_vr = result.x[0]
-
-    # Refine the slope by fitting with fixed abscissa.
-    result = minimize(
-        fun=_cost_perpendicular_distance_slope,
-        x0=slope_n,
-        bounds=((1.5*slope_n, 0.5*slope_n),),
-        args=(radius[mask_negative_vr & mask_low_radius], 
-              log_velocity_squared[mask_negative_vr & mask_low_radius],
-              abscissa_negative_vr, width, radius_pivot),
-        method='Nelder-Mead',
-    )
-    slope_negative_vr = result.x[0]
 
     # Compute low radius correction parameters
     b_neg = abscissa_negative_vr - slope_negative_vr * radius_pivot
@@ -2904,7 +2796,7 @@ def calibrate(
         b_pivot_pos = 1.8087
 
         # Negative radial velocity
-        slope_neg = -1.5812 + 0.8603 * (omega_m - 0.3)
+        slope_neg = slope_pos
         b_pivot_neg = 0.6204
         
         # Low radius correction
@@ -2922,6 +2814,3 @@ def calibrate(
         self_calibration(save_path=save_path, **kwargs)
 
     return
-
-
-###
