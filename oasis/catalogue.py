@@ -758,8 +758,9 @@ class MiniBoxClassifier:
                                 ignore_index=True)
         if len(self.orb_hid) > 0:
             self.orb_hid = numpy.concatenate(self.orb_hid).astype(self.hid[0].dtype)
-        self.orb_pid = numpy.concatenate(self.orb_pid).astype(self.pid_part[0].dtype)
-        self.orb_mass = numpy.concatenate(self.orb_mass)
+        if len(self.orb_pid) > 0:
+            self.orb_pid = numpy.concatenate(self.orb_pid).astype(self.pid_part[0].dtype)
+            self.orb_mass = numpy.concatenate(self.orb_mass)
 
     # ==========================================================================
     def _percolation(self):
@@ -877,10 +878,6 @@ class MiniBoxClassifier:
         # Concatenate lists into arrays
         self.orb_pid_perc = numpy.concatenate(orb_pid_perc) if orb_pid_perc else numpy.array([])
         self.orb_hid_perc = numpy.concatenate(orb_hid_perc) if orb_hid_perc else numpy.array([])
-        
-        # If no haloes where fuond in this mini-box
-        if len(self.haloes_perc.index) <= 0:
-            self.haloes_perc = None
 
     # ==========================================================================
     def _save_catalogues(self):
@@ -937,25 +934,27 @@ class MiniBoxClassifier:
             numpy.uint32, numpy.uint32, numpy.uint32, None, numpy.int32, numpy.uint32, numpy.uint32,
             numpy.uint32
         )
-        with h5py.File(full_path, "w") as hdf:
-            # Halo catalogue
-            for i, key in enumerate(self.haloes_perc.columns):
-                if key == 'INMB':
-                    continue
-                if key in ['pos', 'vel']:
-                    data = numpy.stack(self.haloes_perc[key].values)
-                else:
-                    data = self.haloes_perc[key].values
-                hdf.create_dataset(f'halo/{key}', data=data, dtype=dtypes[i])
 
-            # Particles
-            hdf.create_dataset('memb/PID', data=self.orb_pid_perc,
-                                dtype=self.orb_pid_perc[0].dtype)
+        if len(self.haloes_perc) > 0:
+            with h5py.File(full_path, "w") as hdf:
+                # Halo catalogue
+                for i, key in enumerate(self.haloes_perc.columns):
+                    if key == 'INMB':
+                        continue
+                    if key in ['pos', 'vel']:
+                        data = numpy.stack(self.haloes_perc[key].values)
+                    else:
+                        data = self.haloes_perc[key].values
+                    hdf.create_dataset(f'halo/{key}', data=data, dtype=dtypes[i])
 
-            # Seeds
-            if len(self.orb_hid_perc) > 0:
-                hdf.create_dataset('memb/Halo_ID', data=self.orb_hid_perc,
-                                dtype=self.orb_hid_perc[0].dtype)
+                # Particles
+                hdf.create_dataset('memb/PID', data=self.orb_pid_perc,
+                                    dtype=self.orb_pid_perc[0].dtype)
+
+                # Seeds
+                if len(self.orb_hid_perc) > 0:
+                    hdf.create_dataset('memb/Halo_ID', data=self.orb_hid_perc,
+                                    dtype=self.orb_hid_perc[0].dtype)
 
     def run(self):
         """Execute the complete halo finding pipeline for this mini-box.
@@ -1222,10 +1221,32 @@ def process_all_miniboxes(
     return None
 
 
+def append_dataset(group: h5py.Group, name: str, data: numpy.ndarray) -> None:
+    """Appends data to dataset or creates it if name does not exist.
+
+    Parameters
+    ----------
+    group : h5py.Group
+        HDF group
+    name : str
+        Dataset name
+    data : numpy.ndarray
+        Data to save under name.
+    """
+    if name in group.keys():
+        ds = group[name]
+        old_shape = ds.shape[0]
+        new_shape = old_shape + data.shape[0]
+        ds.resize((new_shape), axis=0)
+        ds[old_shape:] = data
+    else:
+        group.create_dataset(name=name, data=data, chunks=True, maxshape=(None,))
+    return
+
+
 def merge_catalogues(
     load_path: str,
     run_name: str,
-    n_mini_boxes: int,
 ) -> None:
     """Merge individual mini-box catalogs into unified halo and member files.
 
@@ -1241,9 +1262,6 @@ def merge_catalogues(
     run_name : str
         Run identifier used to locate mini-box catalog directory and
         name output files.
-    n_mini_boxes : int
-        Total number of mini-box catalog files to merge. Typically
-        computed as ceil(boxsize/minisize)^3.
 
     Returns
     -------
@@ -1293,33 +1311,26 @@ def merge_catalogues(
     run_orbiting_mass_assignment : High-level function that calls both.
     """
     save_path = load_path + f'run_{run_name}/mini_box_catalogues/'
+    files = os.listdir(save_path)
 
     # Find dataset keys from file
     first_file = None
-    for i in range(n_mini_boxes):
-        file_path = os.path.join(save_path, f"{i}.hdf5")
-        if os.path.exists(file_path):
-            first_file = file_path
-            break
-    if first_file is None:
+    if len(files) > 0:
+        first_file = os.path.join(save_path, files[0])
+        with h5py.File(first_file, 'r') as hdf_load:
+            halo_keys = list((hdf_load['halo'].keys()))
+    else:
         raise FileNotFoundError("No mini-box catalogue files found.")
-    
-    with h5py.File(first_file, 'r') as hdf_load:
-        halo_keys = list((hdf_load['halo'].keys()))
     
     # Load and concatenate data
     halo_data = {key: [] for key in halo_keys}
 
     n_part, n_seed = 0, 0
     hdf_memb = h5py.File(load_path + f'run_{run_name}/members.hdf5', 'w')
-    for i in tqdm(range(n_mini_boxes), ncols=100, desc='Merging catalogues',
-                  colour='green'):
-        
-        # Check if current file exists
-        file_path = os.path.join(save_path, f"{i}.hdf5")
-        if not os.path.exists(file_path):
-            continue
-
+    
+    for file in tqdm(files, ncols=100, desc='Merging catalogues',
+                     colour='green'):
+        file_path = os.path.join(save_path, file)
         with h5py.File(file_path, 'r') as hdf_load:
             if 'halo' not in hdf_load.keys():
                 continue
@@ -1329,33 +1340,12 @@ def merge_catalogues(
             # Number of subhalos in current file
             n_seed_this = 0
             has_sub_halos = 'Halo_ID' in hdf_load['memb'].keys()
+
+            # Append data
+            append_dataset(hdf_memb, 'PID', hdf_load['memb/PID'][()])
             if has_sub_halos:
+                append_dataset(hdf_memb, 'Halo_ID', hdf_load['memb/Halo_ID'][()])
                 n_seed_this = hdf_load['memb/Halo_ID'].shape[0]
-
-            # This reshaping of the dataset after every new file...
-            if first_file:  # Create the dataset at first pass.
-                hdf_memb.create_dataset(name='PID',
-                                        chunks=True, maxshape=(None,),
-                                        data=hdf_load['memb/PID'][()])
-                if has_sub_halos:
-                    hdf_memb.create_dataset(name='Halo_ID',
-                                            chunks=True, maxshape=(None,),
-                                            data=hdf_load['memb/Halo_ID'][()])
-                first_file = False
-            else:
-                # Number of particles so far plus this file's total.
-                new_shape = n_part + n_part_this
-                # Resize axes and save incoming data
-                hdf_memb['PID'].resize((new_shape), axis=0)
-                hdf_memb['PID'][n_part:] = hdf_load['memb/PID'][()]
-
-                # Number of seeds so far plus this file's total.
-                if has_sub_halos:
-                    new_shape = n_seed + n_seed_this
-                    # Resize axes and save incoming data
-                    hdf_memb['Halo_ID'].resize((new_shape), axis=0)
-                    hdf_memb['Halo_ID'][n_seed:] = \
-                        hdf_load['memb/Halo_ID'][()]
 
             # Halo data ========================================================
             for key in halo_keys:
@@ -1530,7 +1520,6 @@ def run_orbiting_mass_assignment(
     merge_catalogues(
         load_path=load_path,
         run_name=run_name,
-        n_mini_boxes=n_mini_boxes,
     )
 
     save_path = load_path + f'run_{run_name}/mini_box_catalogues/'
