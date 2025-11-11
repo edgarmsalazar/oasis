@@ -756,8 +756,8 @@ class MiniBoxClassifier:
         # Sort haloes by their orbiting mass
         self.haloes.sort_values(by='Morb', ascending=False, inplace=True, 
                                 ignore_index=True)
-
-        self.orb_hid = numpy.concatenate(self.orb_hid).astype(self.hid[0].dtype)
+        if len(self.orb_hid) > 0:
+            self.orb_hid = numpy.concatenate(self.orb_hid).astype(self.hid[0].dtype)
         self.orb_pid = numpy.concatenate(self.orb_pid).astype(self.pid_part[0].dtype)
         self.orb_mass = numpy.concatenate(self.orb_mass)
 
@@ -1337,9 +1337,10 @@ def merge_catalogues(
                 hdf_memb.create_dataset(name='PID',
                                         chunks=True, maxshape=(None,),
                                         data=hdf_load['memb/PID'][()])
-                hdf_memb.create_dataset(name='Halo_ID',
-                                        chunks=True, maxshape=(None,),
-                                        data=hdf_load['memb/Halo_ID'][()])
+                if has_sub_halos:
+                    hdf_memb.create_dataset(name='Halo_ID',
+                                            chunks=True, maxshape=(None,),
+                                            data=hdf_load['memb/Halo_ID'][()])
                 first_file = False
             else:
                 # Number of particles so far plus this file's total.
