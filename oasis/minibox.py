@@ -834,9 +834,9 @@ def load_seeds(
     # Load all adjacent boxes
     for i, mini_box in enumerate(mini_box_ids):
         file_name = load_path + f'mini_boxes_nside_{cells_per_side}/{mini_box}.hdf5'
-        # if not os.path.exists(file_name):
-        #     continue
         with h5py.File(file_name, 'r') as hdf:
+            if not 'seed' in hdf.keys():
+                continue
             positions.append(hdf['seed/pos'][()])
             velocities.append(hdf['seed/vel'][()])
             ids.append(hdf['seed/ID'][()])
@@ -895,10 +895,7 @@ def load_seeds(
     # Final validation
     n_loaded = len(positions)
     if n_loaded == 0:
-        raise RuntimeError(
-            f"No seeds found within padding distance {padding} "
-            f"of mini-box {mini_box_id}"
-        )
+        return (() for _ in range(7))
 
     # Sort seeds by M200 (largest first)
     argorder = numpy.argsort(-m200)
