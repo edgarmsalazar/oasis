@@ -378,27 +378,42 @@ def split_simulation_into_mini_boxes(
             upp = min((chunk + 1) * chunksize, n_items)
             mini_box_ids[low:upp] = get_mini_box_id(positions[low:upp], boxsize, minisize)
     
-    # Group by mini-box ID (linear time)
+    # OPTIMIZATION: Sort all arrays by mini-box ID once
+    # This groups all particles in the same mini-box together
     with TimerContext("Sorting by mini-box ID", fancy=False):
-        unique_ids, inverse = numpy.unique(mini_box_ids, return_inverse=True)
+        sort_indices = numpy.argsort(mini_box_ids)
+        mini_box_ids = mini_box_ids[sort_indices]
+        positions = positions[sort_indices]
+        velocities = velocities[sort_indices]
+        uid = uid[sort_indices]
+        
+        if not isinstance(mass, float):
+            mass = mass[sort_indices]
+        
+        if props:
+            data_arrays, data_labels, data_dtypes = props
+            data_arrays = [arr[sort_indices] for arr in data_arrays]
+    
+    # Find boundaries of each mini-box in the sorted arrays
+    # This is much faster than using masks
+    unique_ids, start_indices = numpy.unique(mini_box_ids, return_index=True)
+    end_indices = numpy.append(start_indices[1:], n_items)
+    
     n_mini_box_ids = len(unique_ids)
-
-    if props:
-        data_arrays, data_labels, data_dtypes = props
 
     # Get smallest data type to represent IDs
     uint_dtype_pid = get_min_uint_dtype(numpy.max(uid))
 
     # For each mini-box, save all items in that box to a separate HDF5 file.
-    def write_mini_box(box_id):
-        box_id = unique_ids[box_id]
-        mask = (inverse == box_id)
-        if not numpy.any(mask):
-            return
-
-        pos = positions[mask]
-        vel = velocities[mask]
-        ids = uid[mask]
+    def write_mini_box(idx):
+        box_id = unique_ids[idx]
+        start = start_indices[idx]
+        end = end_indices[idx]
+        
+        # Direct slicing is much faster than boolean masking
+        pos = positions[start:end]
+        vel = velocities[start:end]
+        ids = uid[start:end]
         
         # Use 'a' mode to append data if file already exists.
         with h5py.File(save_dir + f'{box_id}.hdf5', 'a') as hdf:
@@ -411,12 +426,12 @@ def split_simulation_into_mini_boxes(
                                    data=mass, dtype=numpy.float32)
             else:
                 hdf.create_dataset(name=f'{particle_type}/{mass_label}', 
-                                   data=mass[mask], dtype=numpy.float32)
+                                   data=mass[start:end], dtype=numpy.float32)
 
             if props:
                 for arr_i, label_i, dtype_i in zip(data_arrays, data_labels, data_dtypes):
                     hdf.create_dataset(name=f'{particle_type}/{label_i}', 
-                                    data=arr_i[mask], dtype=dtype_i)
+                                    data=arr_i[start:end], dtype=dtype_i)
 
     if n_threads > 1:
         try:
