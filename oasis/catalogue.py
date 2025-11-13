@@ -1392,7 +1392,7 @@ def run_orbiting_mass_assignment(
     seed_prop_names: tuple[str] = ('M200b', 'R200b', 'Rs'),
     fast_mass: bool = False,
     n_threads: int = None,
-    cleanup: bool = False,
+    cleanup: bool | str = False,
 ) -> None:
     """Generate complete halo catalog using kinetic energy classification.
 
@@ -1436,9 +1436,10 @@ def run_orbiting_mass_assignment(
     n_threads : int, optional
         Number of parallel workers for mini-box processing. If None,
         automatically determined as min(cpu_count/2, n_mini_boxes).
-    cleanup : bool, default=False
+    cleanup : bool | str, default=False
         If True, delete individual mini-box catalog files after merging to
-        save disk space. Final catalogs are retained.
+        save disk space. Final catalogs are retained. Also removes the mini-box
+        directory if set to 'all'.
 
     Returns
     -------
@@ -1516,16 +1517,21 @@ def run_orbiting_mass_assignment(
         n_threads=n_threads,
     )
 
-    n_mini_boxes = numpy.int_(numpy.ceil(boxsize / minisize))**3
     merge_catalogues(
         load_path=load_path,
         run_name=run_name,
     )
 
-    save_path = load_path + f'run_{run_name}/mini_box_catalogues/'
     if cleanup:
-        for item in os.listdir(save_path):
-            os.remove(save_path + item)
-        os.removedirs(save_path)
+        catalogues_path = load_path + f'run_{run_name}/mini_box_catalogues/'
+        for item in os.listdir(catalogues_path):
+            os.remove(catalogues_path + item)
+        os.removedirs(catalogues_path)
+    if cleanup == 'all':
+        n_cells = int(numpy.ceil(boxsize / minisize))
+        mini_boxes_path = load_path + f'mini_boxes_nside_{n_cells}/'
+        for item in os.listdir(mini_boxes_path):
+            os.remove(mini_boxes_path + item)
+        os.removedirs(mini_boxes_path)
 
     return None
