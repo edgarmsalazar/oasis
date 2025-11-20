@@ -856,20 +856,20 @@ class MiniBoxClassifier:
             orb_hid_perc.append(new_orb_s)
 
             self.haloes_perc.loc[len(self.haloes_perc.index)] = [
-                self.haloes["Halo_ID"][i],
-                self.haloes["pos"][i],
-                self.haloes["vel"][i],
-                self.haloes["R200b"][i],
-                self.haloes["M200b"][i],
-                morb,
-                n_orb,
-                n_tot_perc,
-                n_tot_perc + n_orb,
-                True,
-                n_orb_s,
-                self.haloes["PID"][i],
-                n_tot_s_perc,
-                n_tot_s_perc + n_orb_s,
+                self.haloes["Halo_ID"][i],  # Halo_ID
+                self.haloes["pos"][i],      # pos
+                self.haloes["vel"][i],      # vel
+                self.haloes["R200b"][i],    # R200b
+                self.haloes["M200b"][i],    # M200b
+                morb,                       # Morb
+                n_orb,                      # Norb
+                n_tot_perc,                 # LIDX
+                n_tot_perc + n_orb,         # RIDX
+                True,                       # INMB
+                n_orb_s,                    # NSUBS
+                self.haloes["PID"][i],      # PID
+                n_tot_s_perc,               # SLIDx
+                n_tot_s_perc + n_orb_s,     # SRIDX
             ]
 
             n_tot_perc += n_orb
@@ -930,9 +930,20 @@ class MiniBoxClassifier:
 
         full_path = self.save_path + f"{self.mini_box_id}.hdf5"
         dtypes = (
-            numpy.uint32, numpy.float32, numpy.float32, numpy.float32, numpy.float32, numpy.float32,
-            numpy.uint32, numpy.uint32, numpy.uint32, None, numpy.int32, numpy.uint32, numpy.uint32,
-            numpy.uint32
+            numpy.uint32,   # Halo_ID
+            numpy.float32,  # pos
+            numpy.float32,  # vel
+            numpy.float32,  # R200b
+            numpy.float32,  # M200b
+            numpy.float32,  # Morb
+            numpy.uint32,   # Norb
+            numpy.uint32,   # LIDX
+            numpy.uint32,   # RIDX
+            None,           # INMB
+            numpy.uint32,   # NSUBS
+            numpy.int32,    # PID
+            numpy.uint32,   # SLIDX
+            numpy.uint32    # SRIDX
         )
 
         if len(self.haloes_perc) > 0:
