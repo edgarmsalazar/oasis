@@ -2792,12 +2792,12 @@ def calibrate(
             raise ValueError("Omega_m out of bounds.")
         
         # Positive radial velocity
-        slope_pos = -2.1203 + 0.7614 * (omega_m - 0.3)
-        b_pivot_pos = 1.8087
+        slope_pos = -2.17603504 + 1.03114681 * (omega_m - 0.3)
+        b_pivot_pos = 1.83532578
 
         # Negative radial velocity
         slope_neg = slope_pos
-        b_pivot_neg = 0.6204
+        b_pivot_neg = 0.67985487
         
         # Low radius correction
         x0 = 0.5
