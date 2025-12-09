@@ -13,10 +13,8 @@ from scipy.stats import iqr as interquartile_range
 from tqdm import tqdm
 
 from oasis.common import (G_GRAVITY, _validate_boxsize_minisize,
-                          _validate_coordinate_array,
-                          _validate_existing_path,
-                          _validate_mini_box_id,
-                          _validate_positive_number,
+                          _validate_coordinate_array, _validate_existing_path,
+                          _validate_mini_box_id, _validate_positive_number,
                           _validate_positive_number_non_zero,
                           _validate_seed_data)
 from oasis.coordinates import relative_coordinates, velocity_components

@@ -744,7 +744,6 @@ class MiniBoxClassifier:
         for i in tqdm(range(self.n_seeds), ncols=100, desc='Finding haloes',
                       colour='green', disable=self.disable_tqdm):
             row = self._classify_single_seed(i)
-            # print(i, row is None)
             if row is not None:
                 results.append(row)
                 
@@ -939,7 +938,7 @@ class MiniBoxClassifier:
             numpy.uint32,   # Norb
             numpy.uint32,   # LIDX
             numpy.uint32,   # RIDX
-            None,           # INMB
+            None,           # INMB is ignored
             numpy.uint32,   # NSUBS
             numpy.int32,    # PID
             numpy.uint32,   # SLIDX

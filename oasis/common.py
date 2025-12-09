@@ -3,7 +3,7 @@ from datetime import datetime
 from functools import partial, wraps
 from pathlib import Path
 from time import perf_counter
-from typing import Callable, Optional, Union, Tuple
+from typing import Callable, Optional, Tuple, Union
 
 import numpy
 
