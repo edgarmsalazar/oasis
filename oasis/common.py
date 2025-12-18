@@ -3,7 +3,7 @@ from datetime import datetime
 from functools import partial, wraps
 from pathlib import Path
 from time import perf_counter
-from typing import Callable, Optional, Union
+from typing import Callable, Optional, Tuple, Union
 
 import numpy
 
@@ -13,7 +13,6 @@ __all__ = [
     'TimerContext',
     'get_min_unit_dtype',
     'ensure_dir_exists',
-    'load_seeds',
 ]
 
 # Gravitational constant
@@ -122,10 +121,18 @@ class TimerContext:
     """
     Context manager for timing code blocks.
 
+    Parameters
+    ----------
+    name : str, optional
+        Name of the operation being timed, by default "operation".
+    fancy : bool, optional
+        Whether to use ANSI colors and bullet markers, by default True.
+    precision : int, optional
+        Decimal precision for the time display, by default 3.
+
     Examples
     --------
     >>> with TimerContext("data processing"):
-    ...     # some time-consuming operation
     ...     time.sleep(1)
     """
 
@@ -138,23 +145,32 @@ class TimerContext:
 
     def __enter__(self):
         self.start_time = perf_counter()
+        if self.fancy:
+            print(
+                f"{AnsiColor.BULLET} {AnsiColor.BOLD}{AnsiColor.OKGREEN}"
+                f"{self.name}... {AnsiColor.ENDC}"
+            )
+        else:
+            print(f"{self.name}...")
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.elapsed = perf_counter() - self.start_time
-        elapsed_str = f"{self.elapsed:.{self.precision}f}s"
+        
+        hours = int(self.elapsed // 3600)
+        remaining_seconds = self.elapsed % 3600
+        minutes = int(remaining_seconds // 60)
+        seconds = remaining_seconds % 60
+        miliseconds = int(10**self.precision * (seconds - int(seconds)))
+        elapsed_str = f"{hours:02d}:{minutes:02d}:{int(seconds):02d}.{miliseconds:03d}"
 
         if self.fancy:
-            print(
-                f"{AnsiColor.BULLET}{AnsiColor.BOLD}{AnsiColor.OKGREEN}"
-                f"{self.name} completed in {AnsiColor.ENDC}"
-                f"{AnsiColor.WARNING}{elapsed_str}{AnsiColor.ENDC}"
-            )
+            print(f"\t {AnsiColor.OKGREEN}completed in {AnsiColor.WARNING}{elapsed_str}{AnsiColor.ENDC}")
         else:
-            print(f"{self.name} completed in {elapsed_str}")
+            print(f"\t completed in {elapsed_str}")
 
 
-def get_min_unit_dtype(num: int) -> numpy.dtype:
+def get_min_uint_dtype(num: int) -> numpy.dtype:
     """
     Determine the minimum unsigned integer dtype to represent a number.
 
@@ -248,23 +264,71 @@ def ensure_dir_exists(
         raise OSError(f"Failed to create directory {path_obj}: {e}") from e
 
 
-def _validate_inputs_positive_number(value, name):
-    """Validate that a value is a positive number."""
+def _validate_positive_number(value: float | int, name: str) -> None:
+    """
+    Validate that a value is numeric and non-negative.
+
+    Parameters
+    ----------
+    value : int or float
+        The value to check.
+    name : str
+        Name of the variable, used in error messages.
+
+    Raises
+    ------
+    TypeError
+        If `value` is not numeric.
+    ValueError
+        If `value` is negative.
+    """
     if not isinstance(value, (int, float, numpy.number)):
         raise TypeError(f"{name} must be numeric")
     if value < 0:
         raise ValueError(f"{name} must be zero or positive")
 
 
-def _validate_inputs_positive_number_non_zero(value, name):
-    """Validate that a value is a positive number."""
-    _validate_inputs_positive_number(value, name)
+def _validate_positive_number_non_zero(value: float | int, name: str) -> None:
+    """
+    Validate that a value is numeric, positive, and non-zero.
+
+    Parameters
+    ----------
+    value : int or float
+        The value to check.
+    name : str
+        Name of the variable, used in error messages.
+
+    Raises
+    ------
+    TypeError
+        If `value` is not numeric.
+    ValueError
+        If `value` is negative or zero.
+    """
+    _validate_positive_number(value, name)
     if value == 0 or value == 0.:
         raise ValueError(f"{name} must be non-zero")
 
 
-def _validate_inputs_coordinate_arrays(arr, name):
-    """Validate coordinate arrays and raise appropriate errors."""
+def _validate_coordinate_array(arr: numpy.ndarray, name: str) -> None:
+    """
+    Validate that a coordinate array has the correct shape and type.
+
+    Parameters
+    ----------
+    arr : numpy.ndarray
+        The coordinate array to validate. Must have shape `(3,)` or `(n_particles, 3)`.
+    name : str
+        Name of the variable, used in error messages.
+
+    Raises
+    ------
+    TypeError
+        If `arr` is not a NumPy array.
+    ValueError
+        If `arr` is empty or has an invalid shape.
+    """
     if not isinstance(arr, numpy.ndarray):
         raise TypeError("Input must be a numpy array")
 
@@ -277,8 +341,24 @@ def _validate_inputs_coordinate_arrays(arr, name):
             f"Input {name} must have shape (3,) or (n_particles, 3)")
 
 
-def _validate_inputs_existing_path(path):
-    """Validate that a path exists and is a directory."""
+def _validate_existing_path(path: str | Path) -> None:
+    """
+    Validate that a given path exists and is a directory.
+
+    Parameters
+    ----------
+    path : str or Path
+        Path to validate. Can be a string or a pathlib.Path object.
+
+    Raises
+    ------
+    TypeError
+        If `path` is not a string or Path instance.
+    FileNotFoundError
+        If the path does not exist.
+    NotADirectoryError
+        If the path exists but is not a directory.
+    """
     if not isinstance(path, (str, Path)):
         raise TypeError("path must be a string or Path object")
 
@@ -289,26 +369,27 @@ def _validate_inputs_existing_path(path):
         raise NotADirectoryError(f"Path is not a directory: {path}")
 
 
-def _validate_inputs_boxsize_minisize(boxsize, minisize):
-    """Validate boxsize and minize and raise appropriate errors."""
+def _validate_boxsize_minisize(boxsize: float | int, minisize: float | int) -> None:
+    """Validate that `boxsize` and `minisize` are positive, non-zero numbers
+    and that `minisize` does not exceed `boxsize`."""
     # Validate both are positive numbers
-    _validate_inputs_positive_number_non_zero(boxsize, "boxsize")
-    _validate_inputs_positive_number_non_zero(minisize, "minisize")
+    _validate_positive_number_non_zero(boxsize, "boxsize")
+    _validate_positive_number_non_zero(minisize, "minisize")
 
     # Check that minisize is not larger than boxsize
     if minisize > boxsize:
         raise ValueError("minisize cannot be larger than boxsize")
 
 
-def _validate_inputs_mini_box_id(mini_box_id, cells_per_side):
-    """Validate mini-box ID and raise appropriate errors."""
-
+def _validate_mini_box_id(mini_box_id: int | numpy.integer, cells_per_side: int | numpy.integer) -> None:
+    """Validate that a mini-box ID is an integer within the valid range for a 
+    cubic grid defined by the number of cells per side."""
     # Check mini_box_id is an integer
     if not isinstance(mini_box_id, (int, numpy.integer)):
         raise TypeError("mini_box_id must be an integer")
 
     # Check mini_box_id is a positive number
-    _validate_inputs_positive_number(mini_box_id, 'mini_box_id')
+    _validate_positive_number(mini_box_id, 'mini_box_id')
 
     # Check cells_per_side is a positive integer
     if not isinstance(cells_per_side, (int, numpy.integer)):
@@ -326,41 +407,28 @@ def _validate_inputs_mini_box_id(mini_box_id, cells_per_side):
         )
 
 
-def _validate_inputs_box_partitioning(positions, velocities, uid, props):
-    """Validate function inputs and raise appropriate errors."""
-    # Check array shapes
-    _validate_inputs_coordinate_arrays(positions, "positions")
-    _validate_inputs_coordinate_arrays(velocities, "velocities")
+def _validate_process_objects(
+    data: Tuple[list | tuple, list | tuple, list | tuple], 
+    n_items: int
+) -> None:
+    """Validate the structure and contents of process object data."""
+    # Check number of items in data must be three
+    if not isinstance(data, tuple) or len(data) != 3:
+        raise ValueError("data must be a tuple of (arrays, labels, dtypes)")
+    
+    # Check all items in data are tuples or lists
+    arrays, labels, dtypes = data
+    if not (isinstance(arrays, (list, tuple)) and
+            isinstance(labels, (list, tuple)) and
+            isinstance(dtypes, (list, tuple))):
+        raise ValueError("data must contain only lists or tuples")
 
-    if uid.ndim != 1:
-        raise ValueError("uid must be a 1D array")
-
-    n_particles = positions.shape[0]
-    if velocities.shape[0] != n_particles or uid.shape[0] != n_particles:
-        raise ValueError(
-            "positions, velocities, and uid must have the same length")
-
-    # Validate props structure if provided
-    if props is not None:
-        if not isinstance(props, tuple) or len(props) != 3:
-            raise ValueError(
-                "props must be a tuple of (arrays, labels, dtypes)")
-
-        arrays, labels, dtypes = props
-        if not (isinstance(arrays, (list, tuple)) and
-                isinstance(labels, (list, tuple)) and
-                isinstance(dtypes, (list, tuple))):
-            raise ValueError("props must contain three lists")
-
-        if not (len(arrays) == len(labels) == len(dtypes)):
-            raise ValueError("All lists in props must have the same length")
-
-        for i, arr in enumerate(arrays):
-            if not isinstance(arr, numpy.ndarray):
-                raise ValueError(f"props array {i} must be a numpy array")
-            if arr.shape[0] != n_particles:
-                raise ValueError(
-                    f"props array {i} must have {n_particles} elements")
+    # Check all items in data are arrays and have the same number of rows
+    for i, arr in enumerate(arrays):
+        if not isinstance(arr, numpy.ndarray):
+            raise ValueError(f"array {i} in data[0] must be a numpy array")
+        if arr.shape[0] != n_items:
+            raise ValueError(f"array {i} in data[0] must have {n_items} elements")
 
 
 def _validate_inputs_load(
@@ -371,29 +439,23 @@ def _validate_inputs_load(
     padding: float,
 ) -> None:
     """Validate inputs for load functions."""
-    # Validate mini_box_id
-    _validate_inputs_mini_box_id(
-        mini_box_id, int(numpy.ceil(boxsize / minisize)))
-
-    # Validate boxsize and minisize
-    _validate_inputs_boxsize_minisize(boxsize, minisize)
-
-    # Validate load_path
-    _validate_inputs_existing_path(load_path)
-
-    # Validate padding
-    _validate_inputs_positive_number_non_zero(padding, "padding")
+    _validate_mini_box_id(mini_box_id, int(numpy.ceil(boxsize / minisize)))
+    _validate_boxsize_minisize(boxsize, minisize)
+    _validate_existing_path(load_path)
+    _validate_positive_number_non_zero(padding, "padding")
 
 
-def _validate_inputs_seed_data(seed_data):
-    """Validate inputs for functions taking seed data."""
+def _validate_seed_data(
+    seed_data: Tuple[numpy.ndarray, numpy.ndarray, numpy.ndarray, numpy.ndarray]
+) -> None:
+    """Validate the structure and consistency of seed data inputs."""
     if len(seed_data) != 4:
         raise ValueError("seed_data must be a tuple of 4 elements")
 
     position, velocity, mass, radius = seed_data
 
-    _validate_inputs_coordinate_arrays(position, "seed positions")
-    _validate_inputs_coordinate_arrays(velocity, "seed velocities")
+    _validate_coordinate_array(position, "seed positions")
+    _validate_coordinate_array(velocity, "seed velocities")
 
     # Check all inputs have the same number of elements
     n_items = len(position)
@@ -403,7 +465,4 @@ def _validate_inputs_seed_data(seed_data):
 
     if not (mass.size == radius.size == len(position) == len(velocity)):
         raise ValueError("All elements in seed_data must have the same length")
-
-
-
-###
+    

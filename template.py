@@ -10,7 +10,7 @@ import numpy as np
 from oasis.calibration import calibrate
 from oasis.catalogue import run_orbiting_mass_assignment
 from oasis.common import G_GRAVITY, ensure_dir_exists, timer
-from oasis.minibox import split_simulation_into_mini_boxes
+from oasis.minibox import process_simulation_data
 
 # ==============================================================================
 #
@@ -51,6 +51,7 @@ calib_vrp_percent: float = 0.995
 calib_vrn_width: float = 0.050
 calib_gradient_radial_limits: tuple[float] = (0.2, 0.5)
 n_threads: int = 50
+diagnostic_plots = True
 
 # Catalogue.
 n_orb_min: int = 200
@@ -83,21 +84,23 @@ def process_seeds() -> None:
     pos, vel, r200b, m200b, hid, rs = seed_data()
 
     # Additional properties to include in seed catalogue.
-    props = [r200b, m200b, rs]
-    labels = ('R200b', 'M200b', 'Rs')
-    dtypes = (np.float32, np.float32, np.float32)
-    props_zip = (props, labels, dtypes)
+    arrays = [r200b, rs]
+    labels = ('R200b', 'Rs')
+    dtypes = (np.float32, np.float32)
+    props = (arrays, labels, dtypes)
 
     # Save seeds into miniboxes according to their minibox ID.
-    split_simulation_into_mini_boxes(
-        positions=pos,
-        velocities=vel,
-        uid=hid,
+    process_simulation_data(
         save_path=save_path,
+        particle_type='seed',
         boxsize=boxsize,
         minisize=minisize,
-        name='seed',
-        props=props_zip,
+        positions=pos,
+        velocities=vel,
+        ids=hid,
+        mass=(m200b, 'M200b'),
+        data=props,
+        n_threads=n_threads,
     )
     return None
 
@@ -106,16 +109,20 @@ def process_seeds() -> None:
 def process_particles() -> None:
     # Load your data.
     pid, pos, vel = particle_data()
+    # If particles have different masses
+    # pid, pos, vel, particle_mass = particle_data()
 
     # Save particles into miniboxes according to their minibox ID.
-    split_simulation_into_mini_boxes(
-        positions=pos,
-        velocities=vel,
-        uid=pid,
+    process_simulation_data(
         save_path=save_path,
+        particle_type='dm',
         boxsize=boxsize,
         minisize=minisize,
-        name='part',
+        positions=pos,
+        velocities=vel,
+        ids=pid,
+        mass=(particle_mass, 'mass'),
+        n_threads=n_threads,
     )
 
     return
@@ -145,14 +152,15 @@ def calibration() -> None:
         boxsize=boxsize,
         minisize=minisize,
         save_path=save_path,
-        particle_mass=particle_mass,
+        particle_type='dm',
         mass_density=mass_density,
         redshift=redshift,
-        n_points=calib_n_points,
         percent=calib_vrp_percent,
         width=calib_vrn_width,
         gradient_radial_lims=calib_gradient_radial_limits,
         n_threads=n_threads,
+        diagnostic_plots=diagnostic_plots,
+        overwrite=False,
     )
 
     return None
@@ -168,9 +176,10 @@ def run_oasis():
         minisize=minisize,
         run_name=run_name,
         padding=padding,
+        particle_type='dm',
         fast_mass=fast_mass,
-        part_mass=particle_mass,
         n_threads=n_threads,
+        cleanup=True,
     )
 
     return
@@ -190,5 +199,3 @@ def main():
 if __name__ == '__main__':
     ensure_dir_exists(save_path)
     main()
-
-#####

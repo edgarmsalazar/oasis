@@ -1,3 +1,5 @@
+import os
+from multiprocessing.dummy import Pool as ThreadPool
 from pathlib import Path
 from typing import List, Optional, Tuple, Union
 
@@ -5,17 +7,16 @@ import h5py
 import numpy
 from tqdm import tqdm
 
-from oasis.common import (TimerContext, _validate_inputs_box_partitioning,
-                          _validate_inputs_boxsize_minisize,
-                          _validate_inputs_coordinate_arrays,
-                          _validate_inputs_load, _validate_inputs_mini_box_id,
-                          ensure_dir_exists, get_min_unit_dtype)
+from oasis.common import (TimerContext, _validate_boxsize_minisize,
+                          _validate_coordinate_array, _validate_inputs_load,
+                          _validate_mini_box_id, _validate_process_objects,
+                          ensure_dir_exists, get_min_uint_dtype)
 from oasis.coordinates import relative_coordinates
 
 __all__ = [
     'get_mini_box_id',
     'get_adjacent_mini_box_ids',
-    'split_simulation_into_mini_boxes',
+    'process_simulation_data',
     'load_particles',
     'load_seeds',
 ]
@@ -82,8 +83,8 @@ def get_mini_box_id(
     EDGE_TOL = 1e-8
 
     # Input validation
-    _validate_inputs_coordinate_arrays(position, name="position")
-    _validate_inputs_boxsize_minisize(boxsize, minisize)
+    _validate_coordinate_array(position, name="position")
+    _validate_boxsize_minisize(boxsize, minisize)
 
     # Validate coordinate bounds
     if numpy.any(position < 0) or numpy.any(position > boxsize):
@@ -188,10 +189,10 @@ def get_adjacent_mini_box_ids(
     111
     """
     # Input validation
-    _validate_inputs_boxsize_minisize(boxsize, minisize)
+    _validate_boxsize_minisize(boxsize, minisize)
 
     cells_per_side = int(numpy.ceil(boxsize / minisize))
-    _validate_inputs_mini_box_id(mini_box_id, cells_per_side)
+    _validate_mini_box_id(mini_box_id, cells_per_side)
 
     # Grid parameters
     total_mini_boxes = cells_per_side**3
@@ -245,12 +246,14 @@ def split_simulation_into_mini_boxes(
     positions: numpy.ndarray,
     velocities: numpy.ndarray,
     uid: numpy.ndarray,
-    save_path: str,
+    save_dir: str,
     boxsize: float,
     minisize: float,
-    name: Optional[str] = None,
-    props: Optional[Tuple[
-        List[numpy.ndarray], List[str], List[numpy.dtype]]] = None
+    particle_type: str,
+    mass: numpy.ndarray,
+    mass_label: str,
+    props: Optional[Tuple[List[numpy.ndarray], List[str], List[numpy.dtype]]] = None,
+    n_threads: Optional[int] = None,
 ) -> None:
     """
     Split simulation data into mini-boxes and save to HDF5 files.
@@ -322,101 +325,226 @@ def split_simulation_into_mini_boxes(
     ...     boxsize=100.0, minisize=10.0
     ... )
     """
-    # Input validation
-    _validate_inputs_boxsize_minisize(boxsize, minisize)
-    _validate_inputs_box_partitioning(positions, velocities, uid, props)
+    n_items = positions.shape[0]
+    if n_items == 0:
+        raise ValueError("No objects provided (empty arrays)")
 
     # Determine number of partitions per side
-    cells_per_side = int(numpy.ceil(boxsize / minisize))
-    n_cells = cells_per_side**3
-    n_items = positions.shape[0]
+    n_cells = int(numpy.ceil(boxsize / minisize))**3
 
     # Trim values outside boxsize due to floating point precision
     positions = numpy.mod(positions, boxsize)
 
-    if n_items == 0:
-        raise ValueError("No particles provided (empty arrays)")
-
-    # Compute mini-box IDs for all items in chunks with size of the average number
-    # of items per mini-box to imporve computation speed and reduce memory usage.
-    # This is important for large simulations with billions of particles.
-    chunksize = max(1, n_items // n_cells)  # Ensure chunksize >= 1
-    uint_dtype = get_min_unit_dtype(n_cells)
+    # Compute mini-box IDs for all objects in chunks with size of the average 
+    # number of items per mini-box to improve computation speed and reduce 
+    # memory usage. This is important for large simulations with billions of 
+    # particles.
+    chunksize = int(max(1, numpy.ceil(n_items / n_cells)))  # Ensure chunksize >= 1
+    uint_dtype = get_min_uint_dtype(n_cells)
     mini_box_ids = numpy.zeros(n_items, dtype=uint_dtype)
 
-    n_chunks = (n_items + chunksize - 1) // chunksize  # Ceiling division
-    for chunk in tqdm(range(n_chunks), desc='Computing IDs', ncols=100, colour='blue'):
-        low = chunk * chunksize
+    def get_chunk_mini_box_ids(i):
+        low = i * chunksize
         # Ensure we don't exceed array bounds
-        upp = min((chunk + 1) * chunksize, n_items)
+        upp = min((i + 1) * chunksize, n_items)
+        mini_box_ids[low:upp] = get_mini_box_id(positions[low:upp], boxsize, minisize)
 
-        mini_box_ids[low:upp] = get_mini_box_id(
-            positions[low:upp], boxsize, minisize
-        )
+    n_chunks = (n_items + chunksize - 1) // chunksize  # Ceiling division
+    
+    # Cap the number of threads to the total number of mini-boxes to process
+    if n_threads is None:
+        n_threads = min(max(1, os.cpu_count()//2), n_chunks)
+    else:
+        n_threads = min(n_threads, n_chunks)
 
-    # Sort data by mini-box id
-    with TimerContext("Sorting by mini-box ID..."):
-        mb_order = numpy.argsort(mini_box_ids)
-        mini_box_ids = mini_box_ids[mb_order]
-        velocities = velocities[mb_order]
-        positions = positions[mb_order]
-        uid = uid[mb_order]
-
+    # Safely handle multiprocessing falure with a fall back to a single thread.
+    if n_threads > 1:
+        try:
+            with ThreadPool(n_threads) as pool:
+                list(tqdm(pool.imap(get_chunk_mini_box_ids, range(n_chunks)),
+                          total=n_chunks, desc='Computing IDs', ncols=100, 
+                          colour='blue'))
+        except Exception as e:
+            print(f"Warning: Parallel processing failed ({e}), "
+                  "falling back to sequential")
+            # Fall back to sequential processing
+            n_threads = 1
+            
+    if n_threads == 1:
+        for chunk in tqdm(range(n_chunks), desc='Computing IDs', ncols=100, 
+                          colour='blue'):
+            low = chunk * chunksize
+            # Ensure we don't exceed array bounds
+            upp = min((chunk + 1) * chunksize, n_items)
+            mini_box_ids[low:upp] = get_mini_box_id(positions[low:upp], boxsize, minisize)
+    
+    # OPTIMIZATION: Sort all arrays by mini-box ID once
+    # This groups all particles in the same mini-box together
+    with TimerContext("Sorting by mini-box ID", fancy=False):
+        sort_indices = numpy.argsort(mini_box_ids)
+        mini_box_ids = mini_box_ids[sort_indices]
+        positions = positions[sort_indices]
+        velocities = velocities[sort_indices]
+        uid = uid[sort_indices]
+        
+        if not isinstance(mass, float):
+            mass = mass[sort_indices]
+        
         if props:
-            labels = props[1]
-            dtypes = props[2]
-            props = props[0]
-            for k, item in enumerate(props):
-                props[k] = item[mb_order]
-
-    # Get chunk indices finding the left-most occurence of all unique values in
-    # a sorted array. This ensures that all items with the same mini-box id are
-    # in the same chunk and processed at the same time.
-    unique_values = numpy.arange(n_cells, dtype=uint_dtype)
-    chunk_idx = numpy.searchsorted(mini_box_ids, unique_values, side="left")
+            data_arrays, data_labels, data_dtypes = props
+            data_arrays = [arr[sort_indices] for arr in data_arrays]
+    
+    # Find boundaries of each mini-box in the sorted arrays
+    # This is much faster than using masks
+    unique_ids, start_indices = numpy.unique(mini_box_ids, return_index=True)
+    end_indices = numpy.append(start_indices[1:], n_items)
+    
+    n_mini_box_ids = len(unique_ids)
 
     # Get smallest data type to represent IDs
-    uint_dtype_pid = get_min_unit_dtype(numpy.max(uid))
-    if props:
-        labels = ('ID', 'pos', 'vel', *labels)
-        dtypes = (uint_dtype_pid, numpy.float32, numpy.float32, *dtypes)
-    else:
-        labels = ('ID', 'pos', 'vel')
-        dtypes = (uint_dtype_pid, numpy.float32, numpy.float32)
+    uint_dtype_pid = get_min_uint_dtype(numpy.max(uid))
 
+    # For each mini-box, save all items in that box to a separate HDF5 file.
+    def write_mini_box(idx):
+        box_id = unique_ids[idx]
+        start = start_indices[idx]
+        end = end_indices[idx]
+        
+        # Direct slicing is much faster than boolean masking
+        pos = positions[start:end]
+        vel = velocities[start:end]
+        ids = uid[start:end]
+        
+        # Use 'a' mode to append data if file already exists.
+        with h5py.File(save_dir + f'{box_id}.hdf5', 'a') as hdf:
+            hdf.create_dataset(name=f'{particle_type}/ID', data=ids, dtype=uint_dtype_pid)
+            hdf.create_dataset(name=f'{particle_type}/pos', data=pos, dtype=numpy.float32)
+            hdf.create_dataset(name=f'{particle_type}/vel', data=vel, dtype=numpy.float32)
+            
+            if isinstance(mass, float):
+                hdf.create_dataset(name=f'{particle_type}/{mass_label}', 
+                                   data=mass, dtype=numpy.float32)
+            else:
+                hdf.create_dataset(name=f'{particle_type}/{mass_label}', 
+                                   data=mass[start:end], dtype=numpy.float32)
+
+            if props:
+                for arr_i, label_i, dtype_i in zip(data_arrays, data_labels, data_dtypes):
+                    hdf.create_dataset(name=f'{particle_type}/{label_i}', 
+                                    data=arr_i[start:end], dtype=dtype_i)
+
+    if n_threads > 1:
+        try:
+            with ThreadPool(n_threads) as pool:
+                list(tqdm(pool.imap_unordered(write_mini_box, range(n_mini_box_ids)),
+                  total=n_mini_box_ids, desc='Saving mini-boxes', ncols=100, colour='green'))
+        except Exception as e:
+            print(
+                f"Warning: Parallel processing failed ({e}), falling back to sequential")
+            # Fall back to sequential processing
+            n_threads = 1
+
+    if n_threads == 1:
+        for i in tqdm(range(n_mini_box_ids), desc='Saving mini-boxes', ncols=100, 
+                      colour='blue'):
+            write_mini_box(i)
+
+    return None
+
+
+def process_simulation_data(
+    save_path: str,
+    particle_type: str,
+    boxsize: float,
+    minisize: float,
+    positions: numpy.ndarray,
+    velocities: numpy.ndarray,
+    ids: numpy.ndarray,
+    mass: Tuple[Union[float, numpy.ndarray], str],
+    data: Optional[Tuple[Tuple[numpy.ndarray], Tuple[str], Tuple[numpy.dtype]]] = None,
+    n_threads: Optional[int] = None,
+) -> None:
+    """
+    Validate and process simulation particle data before saving.
+
+    Parameters
+    ----------
+    save_path : str
+        Path to save processed data.
+    particle_type : str
+        Particle category (e.g., "dm", "gas", "stars").
+    boxsize : float
+        Simulation box size.
+    minisize : float
+        Size of smaller sub-boxes.
+    positions : numpy.ndarray
+        Particle position array of shape (N, 3).
+    velocities : numpy.ndarray
+        Particle velocity array of shape (N, 3).
+    ids : numpy.ndarray
+        Unique particle IDs of shape (N,).
+    mass : tuple of (float or numpy.ndarray, str)
+        Mass information and corresponding label.
+    data : tuple, optional
+        Additional simulation arrays with (arrays, labels, dtypes).
+    n_threads : int, optional
+        Number of threads to use for parallel operations.
+
+    Raises
+    ------
+    ValueError
+        If arrays have mismatched lengths or invalid types.
+    """
+    # Validate inputs
+    _validate_boxsize_minisize(boxsize, minisize)
+    _validate_coordinate_array(positions, "positions")
+    _validate_coordinate_array(velocities, "velocities")
+
+    if ids.ndim != 1:
+        raise ValueError("ids must be a 1D array")
+
+    if not isinstance(mass, tuple):
+        raise ValueError("Input 'mass' must be either tuple(float, str) or tuple(array, str)")
+    mass, mass_label = mass
+
+    if isinstance(mass, float):
+        shapes = (velocities.shape[0], ids.shape[0])
+    else:
+        shapes = (velocities.shape[0], ids.shape[0], mass.shape[0])
+
+    n_particles = positions.shape[0]
+    if any(shape != n_particles for shape in shapes):
+        raise ValueError("All positions, velocities, ids and masses must have "
+                         "the same number of elements")
+
+    # If particle type is 'dm' then data must be a float.
+    if particle_type in ('dm', 'part') and not isinstance(mass, (float, int)):
+        raise ValueError("Expected 'data' to be scalar for selected "
+                         f"particle_type but found type {type(mass)}")
+    
+    # Validate seed data shape and type
+    if data:
+        _validate_process_objects(data, positions.shape[0])
+    
+    # Determine number of partitions per side
+    cells_per_side = int(numpy.ceil(boxsize / minisize))
     # Create target directory
     save_dir = save_path + f'mini_boxes_nside_{cells_per_side}/'
     ensure_dir_exists(save_dir)
 
-    # For each mini-box, save all items in that box to a separate HDF5 file.
-    # Use 'a' mode to append data if file already exists.
-    for i, mini_box_id in enumerate(tqdm(unique_values,
-                                         desc='Saving mini-boxes',
-                                         ncols=100, colour='blue')):
-        # Select chunk
-        low = chunk_idx[i]
-        if i < n_cells - 1:
-            upp = chunk_idx[i + 1]
-        else:
-            upp = None
-
-        pos_chunk = positions[low: upp]
-        vel_chunk = velocities[low: upp]
-        pid_chunk = uid[low: upp]
-
-        with h5py.File(save_dir + f'{mini_box_id}.hdf5', 'a') as hdf:
-            if props:
-                props_chunks = [item[low: upp] for item in props]
-                data = (pid_chunk, pos_chunk, vel_chunk, *props_chunks)
-            else:
-                data = (pid_chunk, pos_chunk, vel_chunk)
-
-            prefix = f'{name}/' if name is not None and name not in hdf.keys() else ''
-
-            for label_i, data_i, dtype_i in zip(labels, data, dtypes):
-                dataset_name = prefix + f'{label_i}'
-                hdf.create_dataset(name=dataset_name,
-                                   data=data_i, dtype=dtype_i)
+    split_simulation_into_mini_boxes(
+        positions=positions,
+        velocities=velocities,
+        uid=ids,
+        save_dir=save_dir,
+        boxsize=boxsize,
+        minisize=minisize,
+        particle_type=particle_type,
+        mass=mass,
+        mass_label=mass_label,
+        props=data,
+        n_threads=n_threads,
+    )
 
     return None
 
@@ -426,6 +554,7 @@ def load_particles(
     boxsize: float,
     minisize: float,
     load_path: Union[str, Path],
+    particle_type: str,
     padding: float = 5.0,
 ) -> Tuple[numpy.ndarray, numpy.ndarray, numpy.ndarray]:
     """
@@ -521,20 +650,31 @@ def load_particles(
     cells_per_side = int(numpy.ceil(boxsize / minisize))
 
     # Create empty lists (containers) to save the data from file for each ID
-    positions, velocities, ids = ([] for _ in range(3))
+    positions, velocities, ids, masses = ([] for _ in range(4))
 
     # Load all adjacent boxes
-    for i, mini_box in enumerate(mini_box_ids):
-        file_name = f'mini_boxes_nside_{cells_per_side}/{mini_box}.hdf5'
-        with h5py.File(load_path + file_name, 'r') as hdf:
-            positions.append(hdf['part/pos'][()])
-            velocities.append(hdf['part/vel'][()])
-            ids.append(hdf['part/ID'][()])
+    try:
+        for i, mini_box in enumerate(mini_box_ids):
+            file_name = f'mini_boxes_nside_{cells_per_side}/{mini_box}.hdf5'
+            with h5py.File(load_path + file_name, 'r') as hdf:
+                positions.append(hdf[f'{particle_type}/pos'][()])
+                velocities.append(hdf[f'{particle_type}/vel'][()])
+                ids.append(hdf[f'{particle_type}/ID'][()])
+                
+                if hdf[f'{particle_type}/mass'].shape == ():
+                    masses = hdf[f'{particle_type}/mass'][()]
+                else:
+                    masses.append(hdf[f'{particle_type}/mass'][()])
+
+    except Exception as e:
+        print(f'Particle type not valid. {e}')
 
     # Concatenate all loaded data into single arrays
     positions = numpy.concatenate(positions)
     velocities = numpy.concatenate(velocities)
     ids = numpy.concatenate(ids)
+    if isinstance(masses, list):
+        masses = numpy.concatenate(masses)
 
     # Select particles within a padding distance of the edge of the box in each
     # direction. First determine the coordinates of the minibox center and then
@@ -569,8 +709,13 @@ def load_particles(
             f"No particles found within padding distance {padding} "
             f"of mini-box {mini_box_id}"
         )
+    
+    positions = positions[mask]
+    velocities = velocities[mask]
+    ids = ids[mask]
+    masses = masses[mask] if isinstance(masses, numpy.ndarray) else masses
 
-    return positions[mask], velocities[mask], ids[mask]
+    return positions, velocities, ids, masses
 
 
 def load_seeds(
@@ -578,6 +723,7 @@ def load_seeds(
     boxsize: float,
     minisize: float,
     load_path: str,
+    seed_prop_names: Tuple[str] = ('M200b', 'R200b', 'Rs'),
     padding: float = 5.0,
 ) -> Tuple[numpy.ndarray]:
     """
@@ -607,6 +753,10 @@ def load_seeds(
         Path to directory containing the mini-box HDF5 files. The directory
         should contain a subdirectory named 'mini_boxes_nside_<xx>/' where <xx>
         is the number of cells per side.
+    seed_prop_names : Tuple[str], optional
+        Tuple with three strings: mass, radius, and scale radius label names in 
+        the mini-box HDF5 files, in case other names (e.g. Mvir, Rvir) were used. 
+        Default is ('M200b', 'R200b', 'Rs').
     padding : float, optional
         Maximum distance from mini-box edges to include seeds. Seeds further 
         than this distance from any edge of the target mini-box will be 
@@ -673,12 +823,14 @@ def load_seeds(
     ...     boxsize=100.0,
     ...     minisize=10.0,
     ...     load_path="/data/simulation/",
+    ...     seed_prop_names=('mvir', 'rvir', 'rs')
     ...     padding=2.0
     ... )
     >>> print(f"Loaded {mask.sum()} seeds from mini-box")
     """
     # Input validation
     _validate_inputs_load(mini_box_id, boxsize, minisize, load_path, padding)
+    label_m200, label_r200, label_rs = seed_prop_names
 
     # Get the adjacent mini-box IDs
     mini_box_ids = get_adjacent_mini_box_ids(
@@ -693,17 +845,19 @@ def load_seeds(
     # Create empty lists (containers) to save the data from file for each ID
     positions, velocities, ids, r200, m200, rs, mini_box_mask = (
         [] for _ in range(7))
-
+    
     # Load all adjacent boxes
     for i, mini_box in enumerate(mini_box_ids):
-        file_name = f'mini_boxes_nside_{cells_per_side}/{mini_box}.hdf5'
-        with h5py.File(load_path + file_name, 'r') as hdf:
+        file_name = load_path + f'mini_boxes_nside_{cells_per_side}/{mini_box}.hdf5'
+        with h5py.File(file_name, 'r') as hdf:
+            if not 'seed' in hdf.keys():
+                continue
             positions.append(hdf['seed/pos'][()])
             velocities.append(hdf['seed/vel'][()])
             ids.append(hdf['seed/ID'][()])
-            r200.append(hdf['seed/R200b'][()])
-            m200.append(hdf['seed/M200b'][()])
-            rs.append(hdf['seed/Rs'][()])
+            r200.append(hdf[f'seed/{label_r200}'][()])
+            m200.append(hdf[f'seed/{label_m200}'][()])
+            rs.append(hdf[f'seed/{label_rs}'][()])
             n_seeds = len(hdf['seed/ID'][()])
             if mini_box == mini_box_id:
                 mini_box_mask.append(numpy.ones(n_seeds, dtype=bool))
@@ -756,10 +910,7 @@ def load_seeds(
     # Final validation
     n_loaded = len(positions)
     if n_loaded == 0:
-        raise RuntimeError(
-            f"No seeds found within padding distance {padding} "
-            f"of mini-box {mini_box_id}"
-        )
+        return (() for _ in range(7))
 
     # Sort seeds by M200 (largest first)
     argorder = numpy.argsort(-m200)
@@ -772,6 +923,3 @@ def load_seeds(
     mini_box_mask = mini_box_mask[argorder]
 
     return positions, velocities, ids, r200, m200, rs, mini_box_mask
-
-
-###
